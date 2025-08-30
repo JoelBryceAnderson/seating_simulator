@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearCanvasButton = document.getElementById('clear-canvas');
     const savePlanButton = document.getElementById('save-plan');
     const loadPlanButton = document.getElementById('load-plan');
+    const exportPdfButton = document.getElementById('export-pdf');
     const toolButtons = [drawTableButton, drawBarrierButton, selectToolButton];
 
     // --- Application State ---
@@ -441,9 +442,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Canvas Drawing ---
-    function redrawCanvas() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const panelBg = getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
+    function redrawCanvas(forExport = false) {
+        const panelBg = forExport ? '#FFFFFF' : getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
         ctx.fillStyle = panelBg;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
@@ -482,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sortedGuests = [...placedGuests].sort((a, b) => a.hoverProgress - b.hoverProgress);
 
         sortedGuests.forEach(guest => {
-            const progress = guest.hoverProgress;
+            const progress = forExport ? 0 : guest.hoverProgress;
             
             const largeFont = 'bold 14px "Playfair Display", serif';
             const smallFont = 'bold 11px "Playfair Display", serif';
@@ -677,6 +677,55 @@ document.addEventListener('DOMContentLoaded', () => {
             closeTimeout = setTimeout(() => button.classList.remove('expanded'), 300);
         });
     });
+
+    // --- PDF Export ---
+    function exportToPdf() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({
+            orientation: 'landscape',
+            unit: 'px',
+            format: [canvas.width, canvas.height]
+        });
+
+        // Draw with a white background for the PDF
+        redrawCanvas(true);
+        const canvasImage = canvas.toDataURL('image/png', 1.0);
+        doc.addImage(canvasImage, 'PNG', 0, 0, canvas.width, canvas.height);
+        redrawCanvas(); // Redraw for the screen
+
+        doc.addPage();
+        doc.setFontSize(20);
+        doc.text("Guest Seating Legend", 20, 20);
+        let yPos = 40;
+
+        shapes.forEach((shape, index) => {
+            if (shape.type === 'table') {
+                const guestIds = seatedGuestsMap.get(index);
+                if (guestIds && guestIds.length > 0) {
+                    doc.setFontSize(16);
+                    doc.text(shape.label || `Table ${index + 1}`, 20, yPos);
+                    yPos += 20;
+                    doc.setFontSize(12);
+                    guestIds.forEach((guestId) => {
+                        const guest = allGuests.find(g => g.id === guestId);
+                        if (guest) {
+                            doc.text(`${guest.firstName} ${guest.lastName}`, 30, yPos);
+                            yPos += 15;
+                            if (yPos > 550) { // Check for page break
+                                doc.addPage();
+                                yPos = 20;
+                            }
+                        }
+                    });
+                    yPos += 10;
+                }
+            }
+        });
+
+        doc.save('seating_plan.pdf');
+    }
+
+    exportPdfButton.addEventListener('click', exportToPdf);
 
     setMode('select');
     renderGuestList();

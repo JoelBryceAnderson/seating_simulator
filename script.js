@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const drawBarrierButton = document.getElementById('draw-barrier');
     const selectToolButton = document.getElementById('select-tool');
     const deleteSelectedButton = document.getElementById('delete-selected');
-    const activeToolIndicator = document.getElementById('active-tool-indicator');
     const clearCanvasButton = document.getElementById('clear-canvas');
     const savePlanButton = document.getElementById('save-plan');
     const loadPlanButton = document.getElementById('load-plan');
@@ -143,40 +142,68 @@ document.addEventListener('DOMContentLoaded', () => {
         const unseatedGuests = allGuests.filter(g => !g.seated);
         unseatedGuests.forEach(guest => {
             const li = document.createElement('li');
-            li.textContent = `${guest.firstName} ${guest.lastName}`;
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = `${guest.firstName} ${guest.lastName}`;
+            li.appendChild(nameSpan);
+
             li.dataset.guestId = guest.id;
             li.draggable = true;
+
+            // Don't let plus-ones have their own plus-ones
+            if (!guest.isPlusOne) {
+                const addPlusOneButton = document.createElement('button');
+                addPlusOneButton.textContent = '+1';
+                addPlusOneButton.className = 'add-plus-one';
+                addPlusOneButton.dataset.parentId = guest.id;
+                li.appendChild(addPlusOneButton);
+            }
+
             const partyColor = getColorForPartyId(guest.partyId, true);
             li.style.borderLeft = `5px solid ${partyColor}`;
             guestListContainer.appendChild(li);
         });
     }
 
+    function addPlusOne(parentId) {
+        const parentGuest = allGuests.find(g => g.id === parentId);
+        if (!parentGuest) {
+            console.error("Parent guest not found");
+            return;
+        }
+
+        const plusOneName = prompt(`Enter the full name for ${parentGuest.firstName} ${parentGuest.lastName}'s guest:`);
+        if (!plusOneName || !plusOneName.trim()) {
+            return;
+        }
+
+        const nameParts = plusOneName.trim().split(' ');
+        const firstName = nameParts[0];
+        const lastName = nameParts.slice(1).join(' ') || '(Guest)';
+
+        const newGuest = {
+            id: `${parentGuest.id}_plus_${Date.now()}`,
+            partyId: parentGuest.partyId,
+            firstName: firstName,
+            lastName: lastName,
+            seated: false,
+            x: 0,
+            y: 0,
+            isPlusOne: true,
+        };
+
+        allGuests.push(newGuest);
+        renderGuestList();
+    }
+
     // --- Mode and Tool Management ---
     function setMode(mode) {
         currentMode = mode;
         canvas.style.cursor = mode.startsWith('draw') ? 'crosshair' : 'default';
-        let activeButton = null;
         toolButtons.forEach(btn => {
-            const isActive = btn.id.includes(mode);
-            btn.classList.toggle('active', isActive);
-            if (isActive) {
-                activeButton = btn;
-            }
+            btn.classList.toggle('active', btn.id.includes(mode));
         });
-        updateActiveToolIndicator(activeButton);
         selectedShapeIndex = null; selectedGuestIndex = null;
         updateDeleteButton(); redrawCanvas();
-    }
-
-    function updateActiveToolIndicator(activeButton) {
-        if (activeButton) {
-            const buttonRect = activeButton.getBoundingClientRect();
-            const toolbarRect = activeButton.parentElement.getBoundingClientRect();
-            const indicatorSize = 6;
-            const leftPosition = buttonRect.left - toolbarRect.left + (buttonRect.width / 2) - (indicatorSize / 2);
-            activeToolIndicator.style.left = `${leftPosition}px`;
-        }
     }
 
     drawTableButton.addEventListener('click', () => setMode('draw-table'));
@@ -410,7 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.font = 'bold 11px "Playfair Display", serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const initials = guest.isPlusOne ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
+            const initials = (guest.isPlusOne && guest.plusOneIndex) ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
             ctx.fillText(initials, guest.x, guest.y);
         });
 
@@ -418,11 +445,29 @@ document.addEventListener('DOMContentLoaded', () => {
             const text = `${hoveredGuest.firstName} ${hoveredGuest.lastName}`;
             ctx.font = '12px "Playfair Display", serif';
             const textWidth = ctx.measureText(text).width;
-            ctx.fillStyle = 'rgba(17, 24, 39, 0.9)';
-            ctx.fillRect(hoveredGuest.x + 15, hoveredGuest.y - 35, textWidth + 16, 26);
-            ctx.fillStyle = '#fff';
+        
+            const boxPadding = 8;
+            const boxWidth = textWidth + 2 * boxPadding;
+            const boxHeight = 26;
+            const guestCircleOffset = 20;
+        
+            let boxX = hoveredGuest.x + guestCircleOffset;
+        
+            if (boxX + boxWidth > canvas.width) {
+                boxX = hoveredGuest.x - guestCircleOffset - boxWidth;
+            }
+        
+            const boxY = hoveredGuest.y - (boxHeight / 2) - GUEST_RADIUS - 5;
+            const textX = boxX + boxPadding;
+            const textY = boxY + boxHeight / 2;
+        
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--tooltip-bg').trim();
+            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+            
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--tooltip-text').trim();
             ctx.textAlign = 'left';
-            ctx.fillText(text, hoveredGuest.x + 23, hoveredGuest.y - 22);
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, textX, textY);
         }
     }
 
@@ -454,6 +499,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    guestListContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('add-plus-one')) {
+            const parentId = e.target.dataset.parentId;
+            addPlusOne(parentId);
+        }
+    });
 
     guestListContainer.addEventListener('dragstart', (e) => {
         if (e.target.dataset.guestId) {
@@ -567,13 +619,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (btn !== button) btn.classList.remove('expanded');
             });
             button.classList.add('expanded');
-            updateActiveToolIndicator(document.querySelector('#toolbar button.active'));
         });
 
         button.addEventListener('mouseleave', () => {
             closeTimeout = setTimeout(() => {
                 button.classList.remove('expanded');
-                updateActiveToolIndicator(document.querySelector('#toolbar button.active'));
             }, 300);
         });
     });

@@ -5,35 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wedding Seating Chart</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="icons.css">
+    <script src="script.js" defer></script>
 </head>
 <body>
     <h1>Wedding Seating Chart</h1>
     <div id="app-container">
         <div id="guest-list-container" class="panel">
             <h2>Guest List</h2>
-            <p style="font-size: 0.8em; margin: 0 0 10px;">Start a new project by loading a CSV file:</p>
+            
+            <p>Start a new project by loading a guest list:</p>
+            <label for="csv-file" class="file-input-label">Choose CSV File</label>
             <input type="file" id="csv-file" accept=".csv">
-            <hr style="margin: 15px 0;">
-            <p style="font-size: 0.8em; margin: 0 0 10px;">Or, update the current list from a CSV:</p>
-            <button id="merge-csv-button">Merge Guest List</button>
+            
+            <hr>
+            
+            <p>Or, update the current guest list from a file:</p>
+            <label for="merge-csv-input" id="merge-csv-button" class="file-input-label primary">Merge Guest List</label>
+            <input type="file" id="merge-csv-input" accept=".csv">
+
             <ul id="guest-list"></ul>
         </div>
         <div id="floor-plan-container" class="panel">
             <h2>Floor Plan</h2>
             <div id="toolbar">
-                <button id="draw-table">Draw Table</button>
-                <button id="draw-barrier">Draw Barrier</button>
-                <button id="select-tool">Move/Select</button>
-                <button id="delete-selected" disabled>Delete Selected</button>
-                <button id="clear-canvas">Clear All</button>
-                <button id="save-plan">Save</button>
-                <button id="load-plan">Load</button>
+                <button id="draw-table" title="Draw Table">
+                    <span class="icon"></span>
+                    <span class="label">Draw Table</span>
+                </button>
+                <button id="draw-barrier" title="Draw Barrier">
+                    <span class="icon"></span>
+                    <span class="label">Draw Barrier</span>
+                </button>
+                <button id="select-tool" title="Move/Select">
+                    <span class="icon"></span>
+                    <span class="label">Move/Select</span>
+                </button>
+                <button id="delete-selected" title="Delete Selected" disabled>
+                    <span class="icon"></span>
+                    <span class="label">Delete</span>
+                </button>
+                <button id="clear-canvas" title="Clear All">
+                    <span class="icon"></span>
+                    <span class="label">Clear All</span>
+                </button>
+                <button id="save-plan" title="Save">
+                    <span class="icon"></span>
+                    <span class="label">Save</span>
+                </button>
+                <button id="load-plan" title="Load">
+                    <span class="icon"></span>
+                    <span class="label">Load</span>
+                </button>
             </div>
             <canvas id="floor-plan" width="800" height="600"></canvas>
             <input type="file" id="load-file-input" style="display: none;" accept=".json">
-            <input type="file" id="merge-csv-input" style="display: none;" accept=".csv">
         </div>
     </div>
-    <script src="script.js"></script>
 </body>
 </html>

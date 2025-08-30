@@ -1,3 +1,19 @@
+// Polyfill for CanvasRenderingContext2D.roundRect
+if (CanvasRenderingContext2D.prototype.roundRect === undefined) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radius) {
+      if (width < 2 * radius) radius = width / 2;
+      if (height < 2 * radius) radius = height / 2;
+      this.beginPath();
+      this.moveTo(x + radius, y);
+      this.arcTo(x + width, y, x + width, y + height, radius);
+      this.arcTo(x + width, y + height, x, y + height, radius);
+      this.arcTo(x, y + height, x, y, radius);
+      this.arcTo(x, y, x + width, y, radius);
+      this.closePath();
+      return this;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- Canvas and UI element setup ---
     const canvas = document.getElementById('floor-plan');
@@ -28,6 +44,46 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectionOffsetX, selectionOffsetY;
     let hoveredGuest = null;
     const GUEST_RADIUS = 15;
+    let animationLoopRunning = false;
+
+    // --- Helper Functions ---
+    const lerp = (start, end, amt) => (1 - amt) * start + amt * end;
+    const initializeGuestAnimation = (guest) => {
+        if (guest && typeof guest.hoverProgress === 'undefined') {
+            guest.hoverProgress = 0;
+        }
+    };
+
+    // --- Animation Loop ---
+    function animationLoop() {
+        let needsRedraw = false;
+        const animationSpeed = 0.3; // Increased speed
+
+        placedGuests.forEach(guest => {
+            const targetProgress = (hoveredGuest && guest.id === hoveredGuest.id) ? 1 : 0;
+            if (Math.abs(guest.hoverProgress - targetProgress) > 0.001) {
+                guest.hoverProgress = lerp(guest.hoverProgress, targetProgress, animationSpeed);
+                needsRedraw = true;
+            } else if (guest.hoverProgress !== targetProgress) {
+                guest.hoverProgress = targetProgress;
+                needsRedraw = true;
+            }
+        });
+
+        if (needsRedraw) {
+            redrawCanvas();
+            requestAnimationFrame(animationLoop);
+        } else {
+            animationLoopRunning = false;
+        }
+    }
+
+    function startAnimation() {
+        if (!animationLoopRunning) {
+            animationLoopRunning = true;
+            requestAnimationFrame(animationLoop);
+        }
+    }
 
     // --- CSV Handling ---
     csvFileInput.addEventListener('change', (event) => handleNewCsvLoad(event.target.files[0]));
@@ -39,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.onload = (e) => {
             try {
                 allGuests = parseRobustCSV(e.target.result);
+                allGuests.forEach(initializeGuestAnimation);
                 clearCanvasButton.click();
             } catch (error) { alert(`Failed to parse CSV file: ${error.message}`); }
         };
@@ -58,13 +115,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function reconcileGuestLists(newGuestList) {
         const getNameKey = g => g ? `${g.firstName}_${g.lastName}`.toLowerCase() : null;
-        const oldGuestStates = new Map(allGuests.map(g => [getNameKey(g), { seated: g.seated, x: g.x, y: g.y }]));
+        const oldGuestStates = new Map(allGuests.map(g => [getNameKey(g), { seated: g.seated, x: g.x, y: g.y, hoverProgress: g.hoverProgress || 0 }]));
         newGuestList.forEach(newGuest => {
             const nameKey = getNameKey(newGuest);
             if (oldGuestStates.has(nameKey)) {
                 const oldState = oldGuestStates.get(nameKey);
                 Object.assign(newGuest, oldState);
             }
+            initializeGuestAnimation(newGuest);
         });
         allGuests = newGuestList.filter(Boolean);
         placedGuests = allGuests.filter(g => g && g.seated);
@@ -190,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
             y: 0,
             isPlusOne: true,
         };
-
+        initializeGuestAnimation(newGuest);
         allGuests.push(newGuest);
         renderGuestList();
     }
@@ -222,6 +280,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const guest = placedGuests[selectedGuestIndex];
                 selectionOffsetX = startX - guest.x;
                 selectionOffsetY = startY - guest.y;
+                hoveredGuest = null;
+                startAnimation();
             } else {
                 selectedShapeIndex = getShapeAt(startX, startY);
                 if (selectedShapeIndex !== null) {
@@ -260,25 +320,25 @@ document.addEventListener('DOMContentLoaded', () => {
             redrawCanvas();
         } else {
             const guestIndex = getGuestAt(mouseX, mouseY);
-            hoveredGuest = guestIndex !== null ? placedGuests[guestIndex] : null;
-            redrawCanvas();
+            const newHoveredGuest = guestIndex !== null ? placedGuests[guestIndex] : null;
+            if (newHoveredGuest !== hoveredGuest) {
+                hoveredGuest = newHoveredGuest;
+                startAnimation();
+            }
         }
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const endX = e.clientX - rect.left;
-        const endY = e.clientY - rect.top;
-
         if (isDrawing) {
             isDrawing = false;
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
             addShape(endX, endY);
         }
         if (isDraggingShape) isDraggingShape = false;
         if (isDraggingGuest) {
             isDraggingGuest = false;
-            const guest = placedGuests[selectedGuestIndex];
-            const tableIndex = getTableForGuest(guest);
             updateSeatedGuestsMap();
         }
         redrawCanvas();
@@ -328,8 +388,6 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedGuestIndex = null;
             updateSeatedGuestsMap();
             renderGuestList();
-            updateDeleteButton();
-            redrawCanvas();
         } else if (selectedShapeIndex !== null) {
             const deletedShape = shapes.splice(selectedShapeIndex, 1)[0];
             if (deletedShape.type === 'table') {
@@ -338,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const guest = allGuests.find(g => g.id === guestId);
                     if(guest) {
                         guest.seated = false;
-                        const placedIndex = placedGuests.findIndex(g => g.id === guestId);
+                        const placedIndex = placedGuests.findIndex(p => p.id === guestId);
                         if(placedIndex > -1) placedGuests.splice(placedIndex, 1);
                     }
                 });
@@ -346,26 +404,34 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedShapeIndex = null;
             updateSeatedGuestsMap();
             renderGuestList();
-            updateDeleteButton();
-            redrawCanvas();
         }
+        updateDeleteButton();
+        redrawCanvas();
     });
     
     function getShapeAt(x, y) {
         for (let i = shapes.length - 1; i >= 0; i--) {
             const shape = shapes[i];
-            if (x >= shape.x && x <= shape.x + shape.width && y >= shape.y && y <= shape.y + shape.height) {
-                return i;
-            }
+            if (x >= shape.x && x <= shape.x + shape.width && y >= shape.y && y <= shape.y + shape.height) return i;
         }
         return null;
     }
 
     function getGuestAt(x, y) {
-        for (let i = placedGuests.length - 1; i >= 0; i--) {
-            const guest = placedGuests[i];
+        // Prioritize hovered guest for easier interaction
+        const sortedGuests = [...placedGuests].sort((a, b) => {
+            if (!hoveredGuest) return 0;
+            if (a.id === hoveredGuest.id) return 1;
+            if (b.id === hoveredGuest.id) return -1;
+            return 0;
+        });
+
+        for (let i = sortedGuests.length - 1; i >= 0; i--) {
+            const guest = sortedGuests[i];
             const distance = Math.sqrt((x - guest.x)**2 + (y - guest.y)**2);
-            if (distance <= GUEST_RADIUS) return i;
+            if (distance <= GUEST_RADIUS) {
+                return placedGuests.findIndex(p => p.id === guest.id);
+            }
         }
         return null;
     }
@@ -413,62 +479,70 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        placedGuests.forEach(guest => {
-            if (!guest) return;
-            ctx.lineWidth = 2;
-            const strokeColor = getColorForPartyId(guest.partyId, true);
-            if (guest.isPlusOne) {
-                ctx.strokeStyle = strokeColor;
-                ctx.fillStyle = '#ffffff';
-            } else {
-                ctx.fillStyle = getColorForPartyId(guest.partyId, false);
-                ctx.strokeStyle = strokeColor;
-            }
-            ctx.beginPath();
-            ctx.arc(guest.x, guest.y, GUEST_RADIUS, 0, 2 * Math.PI);
-            ctx.shadowColor = 'rgba(0,0,0,0.1)';
-            ctx.shadowBlur = 4;
-            ctx.shadowOffsetY = 2;
-            ctx.fill();
-            ctx.shadowColor = 'transparent';
-            ctx.stroke();
+        const sortedGuests = [...placedGuests].sort((a, b) => a.hoverProgress - b.hoverProgress);
 
+        sortedGuests.forEach(guest => {
+            const progress = guest.hoverProgress;
+            
+            const largeFont = 'bold 14px "Playfair Display", serif';
+            const smallFont = 'bold 11px "Playfair Display", serif';
+            const text = `${guest.firstName} ${guest.lastName}`;
+
+            ctx.font = largeFont;
+            const textMetrics = ctx.measureText(text);
+            const targetWidth = textMetrics.width + 20;
+            const startWidth = GUEST_RADIUS * 2;
+            const currentWidth = lerp(startWidth, targetWidth, progress);
+            const currentHeight = GUEST_RADIUS * 2;
+            
+            let rectX = guest.x - currentWidth / 2;
+            let rectY = guest.y - currentHeight / 2;
+
+            // Boundary checks
+            if (rectX < 0) rectX = 0;
+            if (rectX + currentWidth > canvas.width) rectX = canvas.width - currentWidth;
+            if (rectY < 0) rectY = 0;
+            if (rectY + currentHeight > canvas.height) rectY = canvas.height - currentHeight;
+
+            const startRadius = GUEST_RADIUS;
+            const endRadius = 8;
+            const currentRadius = lerp(startRadius, endRadius, progress);
+            
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = getColorForPartyId(guest.partyId, true);
+            ctx.fillStyle = guest.isPlusOne ? '#ffffff' : getColorForPartyId(guest.partyId, false);
+            ctx.shadowColor = `rgba(0,0,0,${lerp(0.1, 0.2, progress)})`;
+            ctx.shadowBlur = lerp(4, 8, progress);
+            ctx.shadowOffsetY = lerp(2, 4, progress);
+            
+            ctx.beginPath();
+            ctx.roundRect(rectX, rectY, currentWidth, currentHeight, currentRadius);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.shadowColor = 'transparent';
+            
             ctx.fillStyle = '#111827';
-            ctx.font = 'bold 11px "Playfair Display", serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const initials = (guest.isPlusOne && guest.plusOneIndex) ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
-            ctx.fillText(initials, guest.x, guest.y);
-        });
-
-        if (hoveredGuest) {
-            const text = `${hoveredGuest.firstName} ${hoveredGuest.lastName}`;
-            ctx.font = '12px "Playfair Display", serif';
-            const textWidth = ctx.measureText(text).width;
-        
-            const boxPadding = 8;
-            const boxWidth = textWidth + 2 * boxPadding;
-            const boxHeight = 26;
-            const guestCircleOffset = 20;
-        
-            let boxX = hoveredGuest.x + guestCircleOffset;
-        
-            if (boxX + boxWidth > canvas.width) {
-                boxX = hoveredGuest.x - guestCircleOffset - boxWidth;
-            }
-        
-            const boxY = hoveredGuest.y - (boxHeight / 2) - GUEST_RADIUS - 5;
-            const textX = boxX + boxPadding;
-            const textY = boxY + boxHeight / 2;
-        
-            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--tooltip-bg').trim();
-            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
             
-            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--tooltip-text').trim();
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(text, textX, textY);
-        }
+            const initials = (guest.isPlusOne && guest.plusOneIndex) ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
+            const textY = rectY + currentHeight / 2;
+            
+            if (progress < 0.5) {
+                ctx.globalAlpha = 1 - (progress * 2);
+                ctx.font = smallFont;
+                ctx.fillText(initials, guest.x, textY);
+            }
+            
+            if (progress > 0.5) {
+                ctx.globalAlpha = (progress - 0.5) * 2;
+                ctx.font = largeFont;
+                ctx.fillText(text, rectX + currentWidth / 2, textY);
+            }
+            
+            ctx.globalAlpha = 1;
+        });
     }
 
     // --- Drag and Drop Logic ---
@@ -478,10 +552,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (shape.type === 'table') {
                 const closestX = Math.max(shape.x, Math.min(guest.x, shape.x + shape.width));
                 const closestY = Math.max(shape.y, Math.min(guest.y, shape.y + shape.height));
-                const distance = Math.sqrt((guest.x - closestX)**2 + (guest.y - closestY)**2);
-                if (distance <= GUEST_RADIUS) {
-                    return i;
-                }
+                if (Math.sqrt((guest.x - closestX)**2 + (guest.y - closestY)**2) <= GUEST_RADIUS) return i;
             }
         }
         return -1;
@@ -489,28 +560,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSeatedGuestsMap() {
         seatedGuestsMap.clear();
-        shapes.forEach((shape, index) => {
-            if (shape.type === 'table') seatedGuestsMap.set(index, []);
-        });
+        shapes.forEach((_, index) => { if (shapes[index].type === 'table') seatedGuestsMap.set(index, []); });
         placedGuests.forEach(guest => {
             const tableIndex = getTableForGuest(guest);
-            if (tableIndex !== -1) {
-                seatedGuestsMap.get(tableIndex).push(guest.id);
-            }
+            if (tableIndex !== -1) seatedGuestsMap.get(tableIndex).push(guest.id);
         });
     }
 
     guestListContainer.addEventListener('click', (e) => {
-        if (e.target.classList.contains('add-plus-one')) {
-            const parentId = e.target.dataset.parentId;
-            addPlusOne(parentId);
-        }
+        if (e.target.classList.contains('add-plus-one')) addPlusOne(e.target.dataset.parentId);
     });
 
     guestListContainer.addEventListener('dragstart', (e) => {
-        if (e.target.dataset.guestId) {
-            e.dataTransfer.setData('text/plain', e.target.dataset.guestId);
-        }
+        if (e.target.dataset.guestId) e.dataTransfer.setData('text/plain', e.target.dataset.guestId);
     });
 
     canvas.addEventListener('dragover', (e) => e.preventDefault());
@@ -524,7 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
             guest.x = e.clientX - rect.left;
             guest.y = e.clientY - rect.top;
             guest.seated = true;
-            if (!placedGuests.find(p => p.id === guest.id)) {
+            if (!placedGuests.some(p => p.id === guest.id)) {
                 placedGuests.push(guest);
             }
             updateSeatedGuestsMap();
@@ -561,11 +623,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     savePlanButton.addEventListener('click', () => {
-        const placedGuestIds = new Set(placedGuests.map(g => g.id));
-        allGuests.forEach(guest => {
-            guest.seated = placedGuestIds.has(guest.id);
-        });
-
         const state = {
             version: 2,
             allGuests,
@@ -590,6 +647,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const state = JSON.parse(e.target.result);
                 allGuests = state.allGuests || state.guests || [];
+                allGuests.forEach(initializeGuestAnimation);
                 shapes = state.shapes || [];
                 placedGuests = allGuests.filter(g => g && g.seated);
                 partyColors = {};
@@ -611,20 +669,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     toolbarButtons.forEach(button => {
         button.addEventListener('mouseenter', () => {
-            if (closeTimeout) {
-                clearTimeout(closeTimeout);
-                closeTimeout = null;
-            }
-            toolbarButtons.forEach(btn => {
-                if (btn !== button) btn.classList.remove('expanded');
-            });
+            if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
+            toolbarButtons.forEach(btn => { if (btn !== button) btn.classList.remove('expanded'); });
             button.classList.add('expanded');
         });
-
         button.addEventListener('mouseleave', () => {
-            closeTimeout = setTimeout(() => {
-                button.classList.remove('expanded');
-            }, 300);
+            closeTimeout = setTimeout(() => button.classList.remove('expanded'), 300);
         });
     });
 
@@ -632,8 +682,5 @@ document.addEventListener('DOMContentLoaded', () => {
     renderGuestList();
     redrawCanvas();
 
-    const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    darkModeMediaQuery.addEventListener('change', () => {
-        redrawCanvas();
-    });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawCanvas);
 });

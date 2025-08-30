@@ -11,7 +11,11 @@
     <div id="app-container">
         <div id="guest-list-container">
             <h2>Guest List</h2>
+            <p style="font-size: 0.8em; margin: 0 0 10px;">Start a new project by loading a CSV file:</p>
             <input type="file" id="csv-file" accept=".csv">
+            <hr style="margin: 15px 0;">
+            <p style="font-size: 0.8em; margin: 0 0 10px;">Or, update the current list from a CSV:</p>
+            <button id="merge-csv-button">Merge Guest List</button>
             <ul id="guest-list"></ul>
         </div>
         <div id="floor-plan-container">
@@ -27,6 +31,7 @@
             </div>
             <canvas id="floor-plan" width="800" height="600"></canvas>
             <input type="file" id="load-file-input" style="display: none;" accept=".json">
+            <input type="file" id="merge-csv-input" style="display: none;" accept=".csv">
         </div>
     </div>
     <script src="script.js"></script>

@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const guestListContainer = document.getElementById('guest-list');
     const csvFileInput = document.getElementById('csv-file');
     const loadFileInput = document.getElementById('load-file-input');
+    const mergeCsvButton = document.getElementById('merge-csv-button');
+    const mergeCsvInput = document.getElementById('merge-csv-input');
 
     // --- Buttons ---
     const drawTableButton = document.getElementById('draw-table');
@@ -17,293 +19,304 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Application State ---
     let allGuests = [];
-    let placedGuests = []; 
+    let placedGuests = [];
+    let shapes = [];
+    let seatedGuestsMap = new Map();
+    let partyColors = {};
 
     let currentMode = 'select';
-    let isDrawing = false;
-    let isDraggingShape = false;
-    let isDraggingGuest = false;
-
+    let isDrawing = false, isDraggingShape = false, isDraggingGuest = false;
     let startX, startY;
-    let selectedShapeIndex = null;
-    let selectedGuestIndex = null;
+    let selectedShapeIndex = null, selectedGuestIndex = null;
     let selectionOffsetX, selectionOffsetY;
     let hoveredGuest = null;
 
     const GUEST_RADIUS = 15;
 
     // --- CSV Handling ---
-    csvFileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
+    csvFileInput.addEventListener('change', (event) => handleNewCsvLoad(event.target.files[0]));
+    mergeCsvButton.addEventListener('click', () => mergeCsvInput.click());
+    mergeCsvInput.addEventListener('change', (event) => handleMergeCsvLoad(event.target.files[0]));
+
+    function handleNewCsvLoad(file) {
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
                 allGuests = parseRobustCSV(e.target.result);
                 clearCanvasButton.click();
-                renderGuestList();
             } catch (error) {
-                console.error("Critical error during CSV parsing:", error);
-                alert(`A critical error occurred: ${error.message}. Check the console for more details.`);
+                console.error("CSV Parse Error:", error);
+                alert(`Failed to parse CSV file: ${error.message}`);
             }
         };
         reader.readAsText(file);
-    });
+    }
+    
+    function handleMergeCsvLoad(file) {
+        if (!file) return;
+        if (allGuests.length === 0) {
+            alert("Please load a project JSON or a base CSV before merging.");
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const newGuestList = parseRobustCSV(e.target.result);
+                reconcileGuestLists(newGuestList);
+            } catch (error) {
+                console.error("CSV Merge Error:", error);
+                alert(`Failed to merge CSV file: ${error.message}`);
+            }
+        };
+        reader.readAsText(file);
+    }
 
-    // **NEW, ROBUST CSV PARSER**
+    // **IMPROVED: "Non-destructive" merge logic using guest NAME as the key**
+    function reconcileGuestLists(newGuestList) {
+        // Step 1: Create a snapshot of the old guests' states using their name as the key
+        const getNameKey = g => `${g.firstName}_${g.lastName}`;
+        const oldGuestStates = new Map(allGuests.map(g => [getNameKey(g), { seated: g.seated, x: g.x, y: g.y }]));
+
+        // Step 2: Apply the old states to the new list based on name matching
+        newGuestList.forEach(newGuest => {
+            const nameKey = getNameKey(newGuest);
+            if (oldGuestStates.has(nameKey)) {
+                const oldState = oldGuestStates.get(nameKey);
+                newGuest.seated = oldState.seated;
+                newGuest.x = oldState.x;
+                newGuest.y = oldState.y;
+            }
+        });
+
+        // Step 3: The new list becomes the master list
+        allGuests = newGuestList;
+        
+        // Step 4: Rebuild placedGuests from the newly updated master list
+        placedGuests = allGuests.filter(g => g && g.seated);
+        
+        partyColors = {}; // Reset colors for re-generation based on new PartyIDs
+        updateSeatedGuestsMap();
+        renderGuestList();
+        alert('Guest list successfully merged! Existing placements have been preserved.');
+    }
+
     function parseRobustCSV(text) {
-        console.clear();
-        console.log("--- Starting Robust CSV Parse ---");
-
         const lines = text.trim().split("\n");
-        if (lines.length < 2) return [];
-
+        if (lines.length < 2) throw new Error("CSV file must have a header row and at least one data row.");
+        
         const delimiter = lines[0].includes('	') ? '	' : ',';
-        console.log(`Delimiter: "${delimiter}"`);
+        const header = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''));
+        
+        const findIndex = names => names.reduce((acc, name) => acc !== -1 ? acc : header.findIndex(h => h.toLowerCase().replace(/\s/g, '') === name), -1);
+        const colIndices = {
+            firstName: findIndex(['firstname']), lastName: findIndex(['lastname']),
+            additionalGuests: findIndex(['additionalguests', 'additional guest']), partyId: findIndex(['partyid'])
+        };
+        if (colIndices.firstName === -1 || colIndices.lastName === -1) throw new Error("'FirstName' and 'LastName' columns not found.");
 
-        // This function correctly splits a single line, respecting quotes.
-        const parseCsvLine = (line) => {
-            const fields = [];
-            let currentField = '';
-            let inQuotes = false;
+        const parseCsvLine = line => {
+            const fields = []; let currentField = ''; let inQuotes = false;
             for (let i = 0; i < line.length; i++) {
                 const char = line[i];
                 if (char === '"') {
-                    if (inQuotes && line[i + 1] === '"') { // Handle escaped quote ""
-                        currentField += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (char === delimiter && !inQuotes) {
-                    fields.push(currentField.trim());
-                    currentField = '';
-                } else {
-                    currentField += char;
-                }
+                    if (inQuotes && line[i + 1] === '"') { currentField += '"'; i++; } 
+                    else { inQuotes = !inQuotes; }
+                } else if (char === delimiter && !inQuotes) { fields.push(currentField); currentField = ''; } 
+                else { currentField += char; }
             }
-            fields.push(currentField.trim());
-            return fields;
-        };
-        
-        const headerRaw = parseCsvLine(lines[0]);
-        const header = headerRaw.map(h => h.trim().replace(/^"|"$/g, '')); // Clean quotes from header
-        console.log("Header row parsed:", header);
-
-        const findIndex = (possibleNames) => {
-            for (const name of possibleNames) {
-                const formattedName = name.toLowerCase().replace(/\s/g, '');
-                const index = header.findIndex(h => h.toLowerCase().replace(/\s/g, '') === formattedName);
-                if (index !== -1) return index;
-            }
-            return -1;
-        };
-        
-        const colIndices = {
-            firstName: findIndex(['firstname']),
-            lastName: findIndex(['lastname']),
-            additionalGuests: findIndex(['additionalguests', 'additional guest']),
-            partyId: findIndex(['partyid'])
+            fields.push(currentField);
+            return fields.map(f => f.trim());
         };
 
-        console.log("Column indices identified:", colIndices);
-        if (colIndices.firstName === -1 || colIndices.lastName === -1) throw new Error("Crucial 'FirstName' and/or 'LastName' columns not found.");
-        if (colIndices.additionalGuests === -1) console.warn("'AdditionalGuests' column not found.");
-
-        let guestIdCounter = 0;
-        let plusOneCount = 0;
         const processedGuests = [];
-
-        lines.slice(1).forEach((line, index) => {
-            if (!line.trim()) return; // Skip empty lines
-            
+        lines.slice(1).forEach(line => {
+            if (!line.trim()) return;
             const values = parseCsvLine(line);
-            console.log(`Processing line ${index + 1}:`, values);
             const firstName = values[colIndices.firstName];
-            
+            const lastName = (values[colIndices.lastName] || '').trim();
+            const partyId = colIndices.partyId !== -1 ? values[colIndices.partyId] : firstName + lastName;
             if (!firstName) return;
-
-            const primaryGuest = { 
-                id: guestIdCounter++,
-                firstName: firstName.trim(), 
-                lastName: (values[colIndices.lastName] || '').trim(), 
-                seated: false, x: 0, y: 0, isPlusOne: false
-            };
+            // Use a stable ID based on name for internal consistency
+            const guestKey = `${firstName.trim()}_${lastName}`;
+            const primaryGuest = { id: guestKey, partyId, firstName: firstName.trim(), lastName, seated: false, x: 0, y: 0, isPlusOne: false };
             processedGuests.push(primaryGuest);
-            
             if (colIndices.additionalGuests !== -1) {
-                const additionalGuestsValue = values[colIndices.additionalGuests];
-                const additionalGuestCount = parseInt(additionalGuestsValue) || 0;
-                 console.log(`  - AdditionalGuests raw value: "${additionalGuestsValue}". Parsed as: ${additionalGuestCount}`);
+                const additionalGuestCount = parseInt(values[colIndices.additionalGuests]) || 0;
                 for (let i = 1; i <= additionalGuestCount; i++) {
-                    plusOneCount++;
-                    processedGuests.push({
-                        id: guestIdCounter++,
-                        firstName: `${primaryGuest.firstName} ${primaryGuest.lastName}'s`,
-                        lastName: `Guest ${i}`,
-                        seated: false, x: 0, y: 0,
-                        isPlusOne: true,
-                        plusOneIndex: i
-                    });
+                    processedGuests.push({ id: `${guestKey}_plus${i}`, partyId, firstName: `${primaryGuest.firstName} ${primaryGuest.lastName}'s`, lastName: `Guest ${i}`, seated: false, x: 0, y: 0, isPlusOne: true, plusOneIndex: i });
                 }
             }
         });
-        
-        console.log(`
---- CSV Parse Complete ---`);
-        console.log(`Created ${processedGuests.length - plusOneCount} primary guests and ${plusOneCount} additional guests.`);
         return processedGuests;
     }
-
+    
+    function getColorForPartyId(partyId) {
+        if (!partyId) return '#ffb347';
+        if (partyColors[partyId]) return partyColors[partyId];
+        let hash = 0;
+        for (let i = 0; i < partyId.length; i++) { hash = partyId.charCodeAt(i) + ((hash << 5) - hash); }
+        partyColors[partyId] = `hsl(${hash % 360}, 70%, 60%)`;
+        return partyColors[partyId];
+    }
 
     function renderGuestList() {
         guestListContainer.innerHTML = '';
-        allGuests.forEach((guest) => {
-            if (!guest.seated) {
+        allGuests.sort((a,b) => a.lastName.localeCompare(b.lastName)).forEach(guest => {
+            if (guest && !guest.seated) {
                 const li = document.createElement('li');
                 li.textContent = `${guest.firstName} ${guest.lastName}`;
                 li.draggable = true;
                 li.dataset.guestId = guest.id;
-                if (guest.isPlusOne) {
-                    li.style.color = '#555';
-                    li.style.paddingLeft = '20px';
-                }
                 guestListContainer.appendChild(li);
             }
         });
     }
 
-    // --- Mode and Tool Selection ---
     function setMode(mode) {
         currentMode = mode;
-        canvas.style.cursor = 'default';
-        if (mode === 'draw-table' || mode === 'draw-barrier') canvas.style.cursor = 'crosshair';
-        selectedShapeIndex = null;
-        selectedGuestIndex = null;
-        updateDeleteButton();
-        redrawCanvas();
+        canvas.style.cursor = mode.startsWith('draw') ? 'crosshair' : 'default';
+        selectedShapeIndex = null; selectedGuestIndex = null;
+        updateDeleteButton(); redrawCanvas();
     }
-
     drawTableButton.addEventListener('click', () => setMode('draw-table'));
     drawBarrierButton.addEventListener('click', () => setMode('draw-barrier'));
     selectToolButton.addEventListener('click', () => setMode('select'));
-
-    // --- Main Canvas Interaction Logic ---
+    
     canvas.addEventListener('mousedown', (e) => {
-        startX = e.offsetX;
-        startY = e.offsetY;
-
-        if (currentMode === 'draw-table' || currentMode === 'draw-barrier') {
-            isDrawing = true;
-        } else if (currentMode === 'select') {
+        startX = e.offsetX; startY = e.offsetY;
+        if (currentMode.startsWith('draw')) isDrawing = true;
+        else if (currentMode === 'select') {
             selectedGuestIndex = getGuestAt(startX, startY);
             selectedShapeIndex = selectedGuestIndex === null ? getShapeAt(startX, startY) : null;
-            
             if (selectedGuestIndex !== null) {
                 isDraggingGuest = true;
                 const guest = placedGuests[selectedGuestIndex];
-                selectionOffsetX = startX - guest.x;
-                selectionOffsetY = startY - guest.y;
+                selectionOffsetX = startX - guest.x; selectionOffsetY = startY - guest.y;
             } else if (selectedShapeIndex !== null) {
                 isDraggingShape = true;
                 const shape = shapes[selectedShapeIndex];
-                selectionOffsetX = startX - shape.x;
-                selectionOffsetY = startY - shape.y;
+                selectionOffsetX = startX - shape.x; selectionOffsetY = startY - shape.y;
             }
-            updateDeleteButton();
-            redrawCanvas();
+            updateDeleteButton(); redrawCanvas();
         }
     });
-
+    
     canvas.addEventListener('mousemove', (e) => {
         const { offsetX, offsetY } = e;
         if (isDrawing) {
             redrawCanvas();
-            drawPreview(offsetX, offsetY);
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.rect(startX, startY, offsetX - startX, offsetY - startY);
+            ctx.stroke();
+            ctx.setLineDash([]);
         } else if (isDraggingGuest && selectedGuestIndex !== null) {
             placedGuests[selectedGuestIndex].x = offsetX - selectionOffsetX;
             placedGuests[selectedGuestIndex].y = offsetY - selectionOffsetY;
-            redrawCanvas();
+            updateSeatedGuestsMap();
         } else if (isDraggingShape && selectedShapeIndex !== null) {
             shapes[selectedShapeIndex].x = offsetX - selectionOffsetX;
             shapes[selectedShapeIndex].y = offsetY - selectionOffsetY;
             redrawCanvas();
         } else if (currentMode === 'select') {
-            const guestIndex = getGuestAt(offsetX, offsetY);
-            hoveredGuest = guestIndex !== null ? placedGuests[guestIndex] : null;
+            hoveredGuest = getGuestAt(offsetX, offsetY) !== null ? placedGuests[getGuestAt(offsetX, offsetY)] : null;
             canvas.style.cursor = (hoveredGuest || getShapeAt(offsetX, offsetY) !== null) ? 'move' : 'default';
             redrawCanvas();
         }
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        if (isDrawing) {
-            addShape(e.offsetX, e.offsetY);
-            setMode('select');
+        if (isDrawing) addShape(e.offsetX, e.offsetY);
+        isDrawing = false; isDraggingShape = false; isDraggingGuest = false;
+        updateSeatedGuestsMap();
+    });
+
+    canvas.addEventListener('dblclick', (e) => {
+        if (currentMode === 'select') {
+            const shapeIndex = getShapeAt(e.offsetX, e.offsetY);
+            if (shapeIndex !== null && shapes[shapeIndex].type === 'table') promptForTableDetails(shapeIndex);
         }
-        isDrawing = false;
-        isDraggingShape = false;
-        isDraggingGuest = false;
     });
 
     function addShape(endX, endY) {
         const rect = { x: Math.min(startX, endX), y: Math.min(startY, endY), width: Math.abs(startX - endX), height: Math.abs(startY - endY) };
-        if (rect.width > 5 && rect.height > 5) {
-            shapes.push({ type: currentMode === 'draw-table' ? 'table' : 'barrier', ...rect });
+        if (rect.width > 10 && rect.height > 10) {
+            const type = currentMode === 'draw-table' ? 'table' : 'barrier';
+            const newShape = { type, ...rect, label: `Table ${shapes.filter(s=>s.type==='table').length+1}`, capacity: 8 };
+            shapes.push(newShape);
+            if (type === 'table') promptForTableDetails(shapes.length - 1);
         }
+        setMode('select');
     }
 
-    function drawPreview(endX, endY) {
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.rect(startX, startY, endX - startX, endY - startY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-    }
-
-    // --- Shape and Guest Management ---
-    deleteSelectedButton.addEventListener('click', () => {
-        if (selectedShapeIndex !== null) {
-            shapes.splice(selectedShapeIndex, 1);
-            selectedShapeIndex = null;
-        }
-        updateDeleteButton();
+    function promptForTableDetails(shapeIndex) {
+        const shape = shapes[shapeIndex];
+        const newLabel = prompt("Enter table label:", shape.label);
+        if (newLabel) shape.label = newLabel;
+        const newCapacity = prompt("Enter max capacity:", shape.capacity);
+        const capacityNum = parseInt(newCapacity);
+        if (!isNaN(capacityNum) && capacityNum >= 0) shape.capacity = capacityNum;
         redrawCanvas();
+    }
+
+    deleteSelectedButton.addEventListener('click', () => {
+        if (selectedShapeIndex === null) return;
+        const guestsOnTable = seatedGuestsMap.get(selectedShapeIndex) || [];
+        guestsOnTable.forEach(guest => {
+            if(guest) guest.seated = false;
+            const idx = placedGuests.findIndex(p => p && p.id === guest.id);
+            if(idx > -1) placedGuests.splice(idx, 1);
+        });
+        shapes.splice(selectedShapeIndex, 1);
+        selectedShapeIndex = null;
+        updateDeleteButton();
+        updateSeatedGuestsMap();
+        renderGuestList();
     });
 
     function getShapeAt(x, y) {
         for (let i = shapes.length - 1; i >= 0; i--) {
             const s = shapes[i];
-            if (x >= s.x && x <= s.x + s.width && y >= s.y && y <= s.y + s.height) return i;
+            if (s && x >= s.x && x <= s.x + s.width && y >= s.y && y <= s.y + s.height) return i;
         }
         return null;
     }
-    
     function getGuestAt(x, y) {
         for (let i = placedGuests.length - 1; i >= 0; i--) {
-            if (Math.hypot(x - placedGuests[i].x, y - placedGuests[i].y) < GUEST_RADIUS) return i;
+            const g = placedGuests[i];
+            if (g && Math.hypot(x - g.x, y - g.y) < GUEST_RADIUS) return i;
         }
         return null;
     }
+    function updateDeleteButton() { deleteSelectedButton.disabled = selectedShapeIndex === null; }
 
-    function updateDeleteButton() {
-        deleteSelectedButton.disabled = selectedShapeIndex === null;
-    }
-
-    // --- Rendering ---
     function redrawCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
         shapes.forEach((shape, index) => {
-            ctx.fillStyle = shape.type === 'table' ? 'lightblue' : 'gray';
+            if (!shape) return;
             ctx.strokeStyle = (selectedShapeIndex === index) ? '#ff4136' : '#000';
             ctx.lineWidth = (selectedShapeIndex === index) ? 3 : 2;
-            ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
-            ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+            if (shape.type === 'table') {
+                const seatedCount = seatedGuestsMap.get(index)?.length || 0;
+                ctx.fillStyle = seatedCount > (shape.capacity || 8) ? '#ffcdd2' : 'lightblue';
+                ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
+                ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(shape.label || 'Table', shape.x + shape.width / 2, shape.y + 20);
+                ctx.font = '12px Arial';
+                ctx.fillText(`${seatedCount} / ${shape.capacity || 8} Seated`, shape.x + shape.width / 2, shape.y + shape.height - 15);
+            } else {
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
+                ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+            }
         });
-
         placedGuests.forEach(guest => {
-            ctx.fillStyle = guest.isPlusOne ? '#87CEEB' : '#ffb347';
+            if (!guest) return;
+            ctx.fillStyle = getColorForPartyId(guest.partyId);
             ctx.beginPath();
             ctx.arc(guest.x, guest.y, GUEST_RADIUS, 0, 2 * Math.PI);
             ctx.fill();
@@ -313,7 +326,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const initials = guest.isPlusOne ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
             ctx.fillText(initials, guest.x, guest.y);
         });
-
         if (hoveredGuest) {
             const text = `${hoveredGuest.firstName} ${hoveredGuest.lastName}`;
             const textWidth = ctx.measureText(text).width;
@@ -324,51 +336,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Drag and Drop Guests from List ---
-    guestListContainer.addEventListener('dragstart', (e) => {
-        if (e.target.tagName === 'LI') e.dataTransfer.setData('text/plain', e.target.dataset.guestId);
-    });
+    function updateSeatedGuestsMap() {
+        seatedGuestsMap.clear();
+        for (const guest of placedGuests) {
+            if (!guest) continue;
+            const tableIndex = getShapeAt(guest.x, guest.y);
+            if (tableIndex !== null && shapes[tableIndex]?.type === 'table') {
+                if (!seatedGuestsMap.has(tableIndex)) seatedGuestsMap.set(tableIndex, []);
+                seatedGuestsMap.get(tableIndex).push(guest);
+            }
+        }
+        redrawCanvas();
+    }
+    guestListContainer.addEventListener('dragstart', (e) => { if (e.target.tagName === 'LI') e.dataTransfer.setData('text/plain', e.target.dataset.guestId); });
     canvas.addEventListener('dragover', (e) => e.preventDefault());
     canvas.addEventListener('drop', (e) => {
         e.preventDefault();
-        const guestId = parseInt(e.dataTransfer.getData('text/plain'));
-        const guest = allGuests.find(g => g.id === guestId);
+        const guestId = e.dataTransfer.getData('text/plain');
+        const guest = allGuests.find(g => g && g.id === guestId);
         if (guest && !guest.seated) {
-            guest.seated = true;
-            guest.x = e.offsetX;
-            guest.y = e.offsetY;
+            guest.seated = true; guest.x = e.offsetX; guest.y = e.offsetY;
             placedGuests.push(guest);
-            renderGuestList();
-            redrawCanvas();
+            updateSeatedGuestsMap(); renderGuestList();
         }
     });
-    
-    // --- Drag Guests back to the list ---
     guestListContainer.addEventListener('dragover', e => e.preventDefault());
     guestListContainer.addEventListener('drop', e => {
-        e.preventDefault();
         if (isDraggingGuest && selectedGuestIndex !== null) {
-            placedGuests[selectedGuestIndex].seated = false;
+            const guest = placedGuests[selectedGuestIndex];
+            if(guest) guest.seated = false;
             placedGuests.splice(selectedGuestIndex, 1);
-            isDraggingGuest = false;
-            selectedGuestIndex = null;
-            renderGuestList();
-            redrawCanvas();
+            isDraggingGuest = false; selectedGuestIndex = null;
+            updateSeatedGuestsMap(); renderGuestList();
         }
     });
 
-    // --- System Actions ---
     clearCanvasButton.addEventListener('click', () => {
-        shapes = []; placedGuests = [];
-        allGuests.forEach(g => g.seated = false);
-        selectedShapeIndex = null;
-        updateDeleteButton();
-        redrawCanvas();
-        renderGuestList();
+        shapes = []; placedGuests = []; allGuests = []; partyColors = {};
+        updateSeatedGuestsMap(); renderGuestList();
     });
-
     savePlanButton.addEventListener('click', () => {
-        const dataStr = JSON.stringify({ shapes, placedGuests }, null, 2);
+        const dataStr = JSON.stringify({ allGuests, shapes, placedGuests, partyColors }, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -376,24 +384,24 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         URL.revokeObjectURL(a.href);
     });
-
     loadPlanButton.addEventListener('click', () => loadFileInput.click());
     loadFileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
+        const file = event.target.files[0]; if (!file) return;
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
                 const data = JSON.parse(e.target.result);
-                shapes = data.shapes || [];
-                placedGuests = data.placedGuests || [];
-                const seatedGuestIds = new Set(placedGuests.map(g => g.id));
-                allGuests.forEach(g => g.seated = seatedGuestIds.has(g.id));
-                renderGuestList();
-                redrawCanvas();
+                allGuests = (data.allGuests || []).filter(Boolean);
+                partyColors = data.partyColors || {};
+                shapes = (data.shapes || []).map(s => ({ label: 'Table', capacity: 8, ...s })).filter(Boolean);
+                placedGuests = (data.placedGuests || []).filter(Boolean);
+                if (allGuests.length === 0 && placedGuests.length > 0) {
+                    allGuests = [...placedGuests];
+                }
+                updateSeatedGuestsMap(); renderGuestList();
             } catch (error) {
                 console.error("Load failed:", error);
-                alert("Could not load the plan.");
+                alert(`Could not load plan: ${error.message}`);
             }
         };
         reader.readAsText(file);

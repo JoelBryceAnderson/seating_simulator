@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const drawBarrierButton = document.getElementById('draw-barrier');
     const selectToolButton = document.getElementById('select-tool');
     const deleteSelectedButton = document.getElementById('delete-selected');
+    const activeToolIndicator = document.getElementById('active-tool-indicator');
     const clearCanvasButton = document.getElementById('clear-canvas');
     const savePlanButton = document.getElementById('save-plan');
     const loadPlanButton = document.getElementById('load-plan');
@@ -155,10 +156,29 @@ document.addEventListener('DOMContentLoaded', () => {
     function setMode(mode) {
         currentMode = mode;
         canvas.style.cursor = mode.startsWith('draw') ? 'crosshair' : 'default';
-        toolButtons.forEach(btn => btn.classList.toggle('active', btn.id.includes(mode)));
+        let activeButton = null;
+        toolButtons.forEach(btn => {
+            const isActive = btn.id.includes(mode);
+            btn.classList.toggle('active', isActive);
+            if (isActive) {
+                activeButton = btn;
+            }
+        });
+        updateActiveToolIndicator(activeButton);
         selectedShapeIndex = null; selectedGuestIndex = null;
         updateDeleteButton(); redrawCanvas();
     }
+
+    function updateActiveToolIndicator(activeButton) {
+        if (activeButton) {
+            const buttonRect = activeButton.getBoundingClientRect();
+            const toolbarRect = activeButton.parentElement.getBoundingClientRect();
+            const indicatorSize = 6;
+            const leftPosition = buttonRect.left - toolbarRect.left + (buttonRect.width / 2) - (indicatorSize / 2);
+            activeToolIndicator.style.left = `${leftPosition}px`;
+        }
+    }
+
     drawTableButton.addEventListener('click', () => setMode('draw-table'));
     drawBarrierButton.addEventListener('click', () => setMode('draw-barrier'));
     selectToolButton.addEventListener('click', () => setMode('select'));
@@ -274,7 +294,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Deletion and Selection ---
     deleteSelectedButton.addEventListener('click', () => {
-        if (selectedShapeIndex !== null) {
+        if (selectedGuestIndex !== null) {
+            const guest = placedGuests[selectedGuestIndex];
+            guest.seated = false;
+            placedGuests.splice(selectedGuestIndex, 1);
+            selectedGuestIndex = null;
+            updateSeatedGuestsMap();
+            renderGuestList();
+            updateDeleteButton();
+            redrawCanvas();
+        } else if (selectedShapeIndex !== null) {
             const deletedShape = shapes.splice(selectedShapeIndex, 1)[0];
             if (deletedShape.type === 'table') {
                 const guestsToUnseat = seatedGuestsMap.get(selectedShapeIndex) || [];
@@ -315,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateDeleteButton() {
-        deleteSelectedButton.disabled = selectedShapeIndex === null;
+        deleteSelectedButton.disabled = selectedShapeIndex === null && selectedGuestIndex === null;
     }
 
     // --- Canvas Drawing ---
@@ -401,8 +430,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function getTableForGuest(guest) {
         for (let i = shapes.length - 1; i >= 0; i--) {
             const shape = shapes[i];
-            if (shape.type === 'table' && guest.x >= shape.x && guest.x <= shape.x + shape.width && guest.y >= shape.y && guest.y <= shape.y + shape.height) {
-                return i;
+            if (shape.type === 'table') {
+                const closestX = Math.max(shape.x, Math.min(guest.x, shape.x + shape.width));
+                const closestY = Math.max(shape.y, Math.min(guest.y, shape.y + shape.height));
+                const distance = Math.sqrt((guest.x - closestX)**2 + (guest.y - closestY)**2);
+                if (distance <= GUEST_RADIUS) {
+                    return i;
+                }
             }
         }
         return -1;
@@ -533,11 +567,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (btn !== button) btn.classList.remove('expanded');
             });
             button.classList.add('expanded');
+            updateActiveToolIndicator(document.querySelector('#toolbar button.active'));
         });
 
         button.addEventListener('mouseleave', () => {
             closeTimeout = setTimeout(() => {
                 button.classList.remove('expanded');
+                updateActiveToolIndicator(document.querySelector('#toolbar button.active'));
             }, 300);
         });
     });

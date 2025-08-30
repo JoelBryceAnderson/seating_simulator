@@ -106,6 +106,18 @@ h1 {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
+    position: relative;
+    padding-bottom: 15px;
+}
+
+#active-tool-indicator {
+    position: absolute;
+    bottom: 0;
+    width: 6px;
+    height: 6px;
+    background-color: var(--text-color);
+    border-radius: 50%;
+    transition: left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 button {
@@ -156,10 +168,12 @@ button:hover {
 }
 
 button.active, button:active {
-    background-color: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
+    background-color: transparent;
+    color: inherit;
+    border-color: #a5a5a5;
 }
+
+
 
 button:disabled {
     opacity: 0.4;
@@ -168,13 +182,16 @@ button:disabled {
 }
 
 #delete-selected {
-    background-color: var(--danger-color);
-    color: white;
-    border-color: var(--danger-color);
+    background-color: transparent;
+    color: inherit;
+    border-color: var(--border-color);
+}
+#delete-selected:hover:not(:disabled) .icon {
+    filter: invert(33%) sepia(88%) saturate(2912%) hue-rotate(340deg) brightness(93%) contrast(91%);
 }
 #delete-selected:hover:not(:disabled) {
-    background-color: #c82333;
-    border-color: #bd2130;
+    border-color: var(--danger-color);
+    color: var(--danger-color);
 }
 
 /* Custom File Input Styles */
@@ -234,6 +251,11 @@ hr {
         --canvas-grid: #3a3a3c;
     }
 
+
+    button .icon {
+        filter: invert(1);
+    }
+
     h1 {
         color: var(--text-color);
     }
@@ -258,9 +280,8 @@ hr {
     }
 
     button.active, button:active {
-        background-color: var(--primary-color);
-        color: #fff;
-        border-color: var(--primary-color);
+        background-color: transparent;
+        border-color: #666;
     }
 
     .file-input-label {

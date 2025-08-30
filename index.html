@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wedding Seating Chart</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Wedding Seating Chart</h1>
+    <div id="app-container">
+        <div id="guest-list-container">
+            <h2>Guest List</h2>
+            <input type="file" id="csv-file" accept=".csv">
+            <ul id="guest-list"></ul>
+        </div>
+        <div id="floor-plan-container">
+            <h2>Floor Plan</h2>
+            <div id="toolbar">
+                <button id="draw-table">Draw Table</button>
+                <button id="draw-barrier">Draw Barrier</button>
+                <button id="select-tool">Move/Select</button>
+                <button id="delete-selected" disabled>Delete Selected</button>
+                <button id="clear-canvas">Clear All</button>
+                <button id="save-plan">Save</button>
+                <button id="load-plan">Load</button>
+            </div>
+            <canvas id="floor-plan" width="800" height="600"></canvas>
+            <input type="file" id="load-file-input" style="display: none;" accept=".json">
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

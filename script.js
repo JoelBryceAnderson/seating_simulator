@@ -1,16 +1,16 @@
 // Polyfill for CanvasRenderingContext2D.roundRect
 if (CanvasRenderingContext2D.prototype.roundRect === undefined) {
     CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radius) {
-      if (width < 2 * radius) radius = width / 2;
-      if (height < 2 * radius) radius = height / 2;
-      this.beginPath();
-      this.moveTo(x + radius, y);
-      this.arcTo(x + width, y, x + width, y + height, radius);
-      this.arcTo(x + width, y + height, x, y + height, radius);
-      this.arcTo(x, y + height, x, y, radius);
-      this.arcTo(x, y, x + width, y, radius);
-      this.closePath();
-      return this;
+        if (width < 2 * radius) radius = width / 2;
+        if (height < 2 * radius) radius = height / 2;
+        this.beginPath();
+        this.moveTo(x + radius, y);
+        this.arcTo(x + width, y, x + width, y + height, radius);
+        this.arcTo(x + width, y + height, x, y + height, radius);
+        this.arcTo(x, y + height, x, y, radius);
+        this.arcTo(x, y, x + width, y, radius);
+        this.closePath();
+        return this;
     }
 }
 
@@ -23,12 +23,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadFileInput = document.getElementById('load-file-input');
     const mergeCsvButton = document.getElementById('merge-csv-button');
     const mergeCsvInput = document.getElementById('merge-csv-input');
+    const trashCanContainer = document.getElementById('trash-can-container');
+    const contextMenu = document.getElementById('context-menu');
 
     // --- Buttons ---
     const drawTableButton = document.getElementById('draw-table');
     const drawBarrierButton = document.getElementById('draw-barrier');
     const selectToolButton = document.getElementById('select-tool');
-    const deleteSelectedButton = document.getElementById('delete-selected');
     const clearCanvasButton = document.getElementById('clear-canvas');
     const savePlanButton = document.getElementById('save-plan');
     const loadPlanButton = document.getElementById('load-plan');
@@ -36,8 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const toolButtons = [drawTableButton, drawBarrierButton, selectToolButton];
 
     // --- Application State ---
-    let allGuests = []; let placedGuests = []; let shapes = [];
-    let seatedGuestsMap = new Map(); let partyColors = {};
+    let allGuests = [];
+    let placedGuests = [];
+    let shapes = [];
+    let seatedGuestsMap = new Map();
+    let partyColors = {};
     let currentMode = 'select';
     let isDrawing = false, isDraggingShape = false, isDraggingGuest = false;
     let startX, startY;
@@ -46,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let hoveredGuest = null;
     const GUEST_RADIUS = 15;
     let animationLoopRunning = false;
+    let shiftPressed = false;
 
     // --- Helper Functions ---
     const lerp = (start, end, amt) => (1 - amt) * start + amt * end;
@@ -58,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Animation Loop ---
     function animationLoop() {
         let needsRedraw = false;
-        const animationSpeed = 0.3; // Increased speed
+        const animationSpeed = 0.3;
 
         placedGuests.forEach(guest => {
             const targetProgress = (hoveredGuest && guest.id === hoveredGuest.id) ? 1 : 0;
@@ -90,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     csvFileInput.addEventListener('change', (event) => handleNewCsvLoad(event.target.files[0]));
     mergeCsvButton.addEventListener('click', () => mergeCsvInput.click());
     mergeCsvInput.addEventListener('change', (event) => handleMergeCsvLoad(event.target.files[0]));
+
     function handleNewCsvLoad(file) {
         if (!file) return;
         const reader = new FileReader();
@@ -98,25 +104,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 allGuests = parseRobustCSV(e.target.result);
                 allGuests.forEach(initializeGuestAnimation);
                 clearCanvasButton.click();
-            } catch (error) { alert(`Failed to parse CSV file: ${error.message}`); }
+            } catch (error) {
+                alert(`Failed to parse CSV file: ${error.message}`);
+            }
         };
         reader.readAsText(file);
     }
+
     function handleMergeCsvLoad(file) {
         if (!file) return;
-        if (allGuests.length === 0) { alert("Please load a project before merging."); return; }
+        if (allGuests.length === 0) {
+            alert("Please load a project before merging.");
+            return;
+        }
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
                 const newGuestList = parseRobustCSV(e.target.result);
                 reconcileGuestLists(newGuestList);
-            } catch (error) { alert(`Failed to merge CSV file: ${error.message}`); }
+            } catch (error) {
+                alert(`Failed to merge CSV file: ${error.message}`);
+            }
         };
         reader.readAsText(file);
     }
+
     function reconcileGuestLists(newGuestList) {
         const getNameKey = g => g ? `${g.firstName}_${g.lastName}`.toLowerCase() : null;
-        const oldGuestStates = new Map(allGuests.map(g => [getNameKey(g), { seated: g.seated, x: g.x, y: g.y, hoverProgress: g.hoverProgress || 0 }]));
+        const oldGuestStates = new Map(allGuests.map(g => [getNameKey(g), {
+            seated: g.seated,
+            x: g.x,
+            y: g.y,
+            hoverProgress: g.hoverProgress || 0
+        }]));
         newGuestList.forEach(newGuest => {
             const nameKey = getNameKey(newGuest);
             if (oldGuestStates.has(nameKey)) {
@@ -133,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
         redrawCanvas();
         alert('Guest list successfully merged!');
     }
+
     function parseRobustCSV(text) {
         const lines = text.trim().split("\n");
         if (lines.length < 2) throw new Error("CSV must have a header row and data.");
@@ -140,17 +161,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const header = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''));
         const findIndex = names => names.reduce((acc, name) => acc !== -1 ? acc : header.findIndex(h => h.toLowerCase().replace(/\s/g, '') === name), -1);
         const colIndices = {
-            firstName: findIndex(['firstname']), lastName: findIndex(['lastname']),
-            additionalGuests: findIndex(['additionalguests', 'additional guest']), partyId: findIndex(['partyid'])
+            firstName: findIndex(['firstname']),
+            lastName: findIndex(['lastname']),
+            additionalGuests: findIndex(['additionalguests', 'additional guest']),
+            partyId: findIndex(['partyid'])
         };
         if (colIndices.firstName === -1 || colIndices.lastName === -1) throw new Error("'FirstName' and 'LastName' columns not found.");
         const parseCsvLine = line => {
-            const fields = []; let currentField = ''; let inQuotes = false;
+            const fields = [];
+            let currentField = '';
+            let inQuotes = false;
             for (let i = 0; i < line.length; i++) {
                 const char = line[i];
-                if (char === '"' && (i === 0 || line[i-1] !== '"')) { inQuotes = !inQuotes; continue; }
-                if (char === delimiter && !inQuotes) { fields.push(currentField); currentField = ''; }
-                else { currentField += char; }
+                if (char === '"' && (i === 0 || line[i - 1] !== '"')) {
+                    inQuotes = !inQuotes;
+                    continue;
+                }
+                if (char === delimiter && !inQuotes) {
+                    fields.push(currentField);
+                    currentField = '';
+                } else {
+                    currentField += char;
+                }
             }
             fields.push(currentField);
             return fields.map(f => f.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
@@ -164,18 +196,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const partyId = colIndices.partyId !== -1 ? values[colIndices.partyId] : `${firstName}_${lastName}`;
             if (!firstName) return;
             const guestId = `${partyId}_${firstName.trim()}_${lastName}`;
-            const primaryGuest = { id: guestId, partyId, firstName: firstName.trim(), lastName, seated: false, x: 0, y: 0, isPlusOne: false };
+            const primaryGuest = {
+                id: guestId,
+                partyId,
+                firstName: firstName.trim(),
+                lastName,
+                seated: false,
+                x: 0,
+                y: 0,
+                isPlusOne: false
+            };
             processedGuests.push(primaryGuest);
             if (colIndices.additionalGuests !== -1) {
                 const additionalGuestCount = parseInt(values[colIndices.additionalGuests]) || 0;
                 for (let i = 1; i <= additionalGuestCount; i++) {
-                    processedGuests.push({ id: `${guestId}_plus${i}`, partyId, firstName: `${primaryGuest.firstName} ${primaryGuest.lastName}'s`, lastName: `Guest ${i}`, seated: false, x: 0, y: 0, isPlusOne: true, plusOneIndex: i });
+                    processedGuests.push({
+                        id: `${guestId}_plus${i}`,
+                        partyId,
+                        firstName: `${primaryGuest.firstName} ${primaryGuest.lastName}'s`,
+                        lastName: `Guest ${i}`,
+                        seated: false,
+                        x: 0,
+                        y: 0,
+                        isPlusOne: true,
+                        plusOneIndex: i
+                    });
                 }
             }
         });
         return processedGuests;
     }
-    
+
     // --- Color Generation ---
     function getColorForPartyId(partyId, forStroke = false) {
         if (!partyId) return '#D1D5DB';
@@ -261,14 +312,15 @@ document.addEventListener('DOMContentLoaded', () => {
         toolButtons.forEach(btn => {
             btn.classList.toggle('active', btn.id.includes(mode));
         });
-        selectedShapeIndex = null; selectedGuestIndex = null;
-        updateDeleteButton(); redrawCanvas();
+        selectedShapeIndex = null;
+        selectedGuestIndex = null;
+        redrawCanvas();
     }
 
     drawTableButton.addEventListener('click', () => setMode('draw-table'));
     drawBarrierButton.addEventListener('click', () => setMode('draw-barrier'));
     selectToolButton.addEventListener('click', () => setMode('select'));
-    
+
     // --- Canvas Event Handlers ---
     canvas.addEventListener('mousedown', (e) => {
         const rect = canvas.getBoundingClientRect();
@@ -295,7 +347,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             isDrawing = true;
         }
-        updateDeleteButton();
         redrawCanvas();
     });
 
@@ -308,16 +359,51 @@ document.addEventListener('DOMContentLoaded', () => {
             redrawCanvas();
             ctx.strokeStyle = 'rgba(0, 122, 255, 0.8)';
             ctx.lineWidth = 2;
-            ctx.strokeRect(startX, startY, mouseX - startX, mouseY - startY);
+            if (currentMode === 'draw-table' && shiftPressed) {
+                const radius = Math.sqrt(Math.pow(mouseX - startX, 2) + Math.pow(mouseY - startY, 2));
+                ctx.beginPath();
+                ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+                ctx.stroke();
+            } else {
+                ctx.strokeRect(startX, startY, mouseX - startX, mouseY - startY);
+            }
         } else if (isDraggingShape) {
             const shape = shapes[selectedShapeIndex];
+            const prevX = shape.x;
+            const prevY = shape.y;
+            
             shape.x = mouseX - selectionOffsetX;
             shape.y = mouseY - selectionOffsetY;
+            
+            const dx = shape.x - prevX;
+            const dy = shape.y - prevY;
+
+            if (dx !== 0 || dy !== 0) {
+                const guestIds = seatedGuestsMap.get(selectedShapeIndex) || [];
+                guestIds.forEach(guestId => {
+                    const guest = allGuests.find(g => g.id === guestId);
+                    if (guest) {
+                        guest.x += dx;
+                        guest.y += dy;
+                    }
+                });
+            }
+
+            const trashCanRect = trashCanContainer.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            const trashX = trashCanRect.left - canvasRect.left;
+            const trashY = trashCanRect.top - canvasRect.top;
+            trashCanContainer.classList.toggle('hover', (mouseX > trashX && mouseX < trashX + trashCanRect.width && mouseY > trashY && mouseY < trashY + trashCanRect.height));
             redrawCanvas();
         } else if (isDraggingGuest) {
             const guest = placedGuests[selectedGuestIndex];
             guest.x = mouseX - selectionOffsetX;
             guest.y = mouseY - selectionOffsetY;
+            const trashCanRect = trashCanContainer.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            const trashX = trashCanRect.left - canvasRect.left;
+            const trashY = trashCanRect.top - canvasRect.top;
+            trashCanContainer.classList.toggle('hover', (mouseX > trashX && mouseX < trashX + trashCanRect.width && mouseY > trashY && mouseY < trashY + trashCanRect.height));
             redrawCanvas();
         } else {
             const guestIndex = getGuestAt(mouseX, mouseY);
@@ -337,30 +423,97 @@ document.addEventListener('DOMContentLoaded', () => {
             const endY = e.clientY - rect.top;
             addShape(endX, endY);
         }
-        if (isDraggingShape) isDraggingShape = false;
-        if (isDraggingGuest) {
-            isDraggingGuest = false;
-            updateSeatedGuestsMap();
+        if (isDraggingShape || isDraggingGuest) {
+            if (trashCanContainer.classList.contains('hover')) {
+                trashCanContainer.classList.add('deleting');
+                setTimeout(() => {
+                    if (isDraggingShape) {
+                        deleteShape(selectedShapeIndex);
+                    } else {
+                        unseatGuest(selectedGuestIndex);
+                    }
+                    trashCanContainer.classList.remove('deleting');
+                    isDraggingShape = false;
+                    isDraggingGuest = false;
+                    trashCanContainer.classList.remove('visible', 'hover');
+                    redrawCanvas();
+                }, 500);
+            } else {
+                isDraggingShape = false;
+                isDraggingGuest = false;
+                trashCanContainer.classList.remove('visible', 'hover');
+                updateSeatedGuestsMap();
+                redrawCanvas();
+            }
         }
+    });
+
+    // --- Context Menu ---
+    canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        selectedGuestIndex = getGuestAt(x, y);
+        selectedShapeIndex = getShapeAt(x, y);
+
+        if (selectedGuestIndex !== null || selectedShapeIndex !== null) {
+            contextMenu.style.left = `${e.clientX}px`;
+            contextMenu.style.top = `${e.clientY}px`;
+            contextMenu.style.display = 'block';
+            const isTable = selectedShapeIndex !== null && shapes[selectedShapeIndex].type === 'table';
+            document.getElementById('context-toggle-shape').style.display = isTable ? 'block' : 'none';
+            document.getElementById('context-edit-details').style.display = isTable ? 'block' : 'none';
+        } else {
+            contextMenu.style.display = 'none';
+        }
+    });
+
+    document.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+    });
+
+    contextMenu.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.target.id === 'context-edit-details') {
+            promptForTableDetails(selectedShapeIndex);
+        } else if (e.target.id === 'context-toggle-shape') {
+            const shape = shapes[selectedShapeIndex];
+            shape.isRound = !shape.isRound;
+        } else if (e.target.id === 'context-delete-item') {
+            if (selectedGuestIndex !== null) {
+                unseatGuest(selectedGuestIndex);
+            } else {
+                deleteShape(selectedShapeIndex);
+            }
+        }
+        contextMenu.style.display = 'none';
         redrawCanvas();
     });
 
-    canvas.addEventListener('dblclick', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
-        const shapeIndex = getShapeAt(clickX, clickY);
-        if (shapeIndex !== null && shapes[shapeIndex].type === 'table') {
-            promptForTableDetails(shapeIndex);
-        }
-    });
-
     function addShape(endX, endY) {
-        const shape = {
-            type: currentMode === 'draw-table' ? 'table' : 'barrier',
-            x: Math.min(startX, endX), y: Math.min(startY, endY),
-            width: Math.abs(endX - startX), height: Math.abs(endY - startY)
-        };
+        let shape;
+        if (currentMode === 'draw-table' && shiftPressed) {
+            const radius = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+            shape = {
+                type: 'table',
+                x: startX - radius,
+                y: startY - radius,
+                width: radius * 2,
+                height: radius * 2,
+                isRound: true,
+            };
+        } else {
+            shape = {
+                type: currentMode === 'draw-barrier' ? 'barrier' : 'table',
+                x: Math.min(startX, endX),
+                y: Math.min(startY, endY),
+                width: Math.abs(endX - startX),
+                height: Math.abs(endY - startY),
+                isRound: false,
+            };
+        }
+
         if (shape.type === 'table') {
             shape.label = `Table ${shapes.filter(s => s.type === 'table').length + 1}`;
             shape.capacity = 8;
@@ -381,45 +534,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Deletion and Selection ---
-    deleteSelectedButton.addEventListener('click', () => {
-        if (selectedGuestIndex !== null) {
-            const guest = placedGuests[selectedGuestIndex];
-            guest.seated = false;
-            placedGuests.splice(selectedGuestIndex, 1);
-            selectedGuestIndex = null;
-            updateSeatedGuestsMap();
-            renderGuestList();
-        } else if (selectedShapeIndex !== null) {
-            const deletedShape = shapes.splice(selectedShapeIndex, 1)[0];
-            if (deletedShape.type === 'table') {
-                const guestsToUnseat = seatedGuestsMap.get(selectedShapeIndex) || [];
-                guestsToUnseat.forEach(guestId => {
-                    const guest = allGuests.find(g => g.id === guestId);
-                    if(guest) {
-                        guest.seated = false;
-                        const placedIndex = placedGuests.findIndex(p => p.id === guestId);
-                        if(placedIndex > -1) placedGuests.splice(placedIndex, 1);
-                    }
-                });
-            }
-            selectedShapeIndex = null;
-            updateSeatedGuestsMap();
-            renderGuestList();
+    function unseatGuest(guestIndex) {
+        const guest = placedGuests[guestIndex];
+        guest.seated = false;
+        placedGuests.splice(guestIndex, 1);
+        selectedGuestIndex = null;
+        updateSeatedGuestsMap();
+        renderGuestList();
+    }
+
+    function deleteShape(shapeIndex) {
+        const deletedShape = shapes.splice(shapeIndex, 1)[0];
+        if (deletedShape.type === 'table') {
+            const guestsToUnseat = seatedGuestsMap.get(shapeIndex) || [];
+            guestsToUnseat.forEach(guestId => {
+                const guest = allGuests.find(g => g.id === guestId);
+                if (guest) {
+                    guest.seated = false;
+                    const placedIndex = placedGuests.findIndex(p => p.id === guestId);
+                    if (placedIndex > -1) placedGuests.splice(placedIndex, 1);
+                }
+            });
         }
-        updateDeleteButton();
-        redrawCanvas();
-    });
-    
+        selectedShapeIndex = null;
+        updateSeatedGuestsMap();
+        renderGuestList();
+    }
+
     function getShapeAt(x, y) {
         for (let i = shapes.length - 1; i >= 0; i--) {
             const shape = shapes[i];
-            if (x >= shape.x && x <= shape.x + shape.width && y >= shape.y && y <= shape.y + shape.height) return i;
+            if (shape.isRound) {
+                const dx = x - (shape.x + shape.width / 2);
+                const dy = y - (shape.y + shape.height / 2);
+                if (dx * dx + dy * dy < (shape.width / 2) * (shape.width / 2)) return i;
+            } else {
+                if (x >= shape.x && x <= shape.x + shape.width && y >= shape.y && y <= shape.y + shape.height) return i;
+            }
         }
         return null;
     }
 
     function getGuestAt(x, y) {
-        // Prioritize hovered guest for easier interaction
         const sortedGuests = [...placedGuests].sort((a, b) => {
             if (!hoveredGuest) return 0;
             if (a.id === hoveredGuest.id) return 1;
@@ -429,7 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (let i = sortedGuests.length - 1; i >= 0; i--) {
             const guest = sortedGuests[i];
-            const distance = Math.sqrt((x - guest.x)**2 + (y - guest.y)**2);
+            const distance = Math.sqrt(Math.pow(x - guest.x, 2) + Math.pow(y - guest.y, 2));
             if (distance <= GUEST_RADIUS) {
                 return placedGuests.findIndex(p => p.id === guest.id);
             }
@@ -437,16 +593,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    function updateDeleteButton() {
-        deleteSelectedButton.disabled = selectedShapeIndex === null && selectedGuestIndex === null;
-    }
-
     // --- Canvas Drawing ---
     function redrawCanvas(forExport = false) {
-        const panelBg = forExport ? '#FFFFFF' : getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
-        ctx.fillStyle = panelBg;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const panelBg = getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
+
+        if (forExport) {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
         const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim();
         const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
         const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim();
@@ -456,21 +612,29 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSelected = selectedShapeIndex === index;
             ctx.lineWidth = isSelected ? 3 : 2;
             ctx.strokeStyle = isSelected ? primaryColor : '#D1D5DB';
-            
+
             if (shape.type === 'table') {
                 const seatedCount = seatedGuestsMap.get(index)?.length || 0;
                 ctx.fillStyle = seatedCount > (shape.capacity || 8) ? '#FEF2F2' : panelBg;
-                ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
-                ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
-                
+
+                if (shape.isRound) {
+                    ctx.beginPath();
+                    ctx.arc(shape.x + shape.width / 2, shape.y + shape.height / 2, shape.width / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                } else {
+                    ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
+                    ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+                }
+
                 ctx.fillStyle = textColor;
                 ctx.font = 'bold 14px "Playfair Display", serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(shape.label || 'Table', shape.x + shape.width / 2, shape.y + 22);
-                
+                ctx.fillText(shape.label || 'Table', shape.x + shape.width / 2, shape.y + shape.height / 2 - 10);
+
                 ctx.font = '12px "Playfair Display", serif';
                 ctx.fillStyle = textMuted;
-                ctx.fillText(`${seatedCount} / ${shape.capacity || 8}`, shape.x + shape.width / 2, shape.y + shape.height - 18);
+                ctx.fillText(`${seatedCount} / ${shape.capacity || 8}`, shape.x + shape.width / 2, shape.y + shape.height / 2 + 10);
             } else {
                 ctx.fillStyle = '#374151';
                 ctx.strokeStyle = '#4B5563';
@@ -478,12 +642,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
             }
         });
-        
+
         const sortedGuests = [...placedGuests].sort((a, b) => a.hoverProgress - b.hoverProgress);
 
         sortedGuests.forEach(guest => {
             const progress = forExport ? 0 : guest.hoverProgress;
-            
+
             const largeFont = 'bold 14px "Playfair Display", serif';
             const smallFont = 'bold 11px "Playfair Display", serif';
             const text = `${guest.firstName} ${guest.lastName}`;
@@ -494,11 +658,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const startWidth = GUEST_RADIUS * 2;
             const currentWidth = lerp(startWidth, targetWidth, progress);
             const currentHeight = GUEST_RADIUS * 2;
-            
+
             let rectX = guest.x - currentWidth / 2;
             let rectY = guest.y - currentHeight / 2;
 
-            // Boundary checks
             if (rectX < 0) rectX = 0;
             if (rectX + currentWidth > canvas.width) rectX = canvas.width - currentWidth;
             if (rectY < 0) rectY = 0;
@@ -507,40 +670,40 @@ document.addEventListener('DOMContentLoaded', () => {
             const startRadius = GUEST_RADIUS;
             const endRadius = 8;
             const currentRadius = lerp(startRadius, endRadius, progress);
-            
+
             ctx.lineWidth = 2;
             ctx.strokeStyle = getColorForPartyId(guest.partyId, true);
             ctx.fillStyle = guest.isPlusOne ? '#ffffff' : getColorForPartyId(guest.partyId, false);
             ctx.shadowColor = `rgba(0,0,0,${lerp(0.1, 0.2, progress)})`;
             ctx.shadowBlur = lerp(4, 8, progress);
             ctx.shadowOffsetY = lerp(2, 4, progress);
-            
+
             ctx.beginPath();
             ctx.roundRect(rectX, rectY, currentWidth, currentHeight, currentRadius);
             ctx.fill();
             ctx.stroke();
-            
+
             ctx.shadowColor = 'transparent';
-            
+
             ctx.fillStyle = '#111827';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            
+
             const initials = (guest.isPlusOne && guest.plusOneIndex) ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
             const textY = rectY + currentHeight / 2;
-            
+
             if (progress < 0.5) {
                 ctx.globalAlpha = 1 - (progress * 2);
                 ctx.font = smallFont;
                 ctx.fillText(initials, guest.x, textY);
             }
-            
+
             if (progress > 0.5) {
                 ctx.globalAlpha = (progress - 0.5) * 2;
                 ctx.font = largeFont;
                 ctx.fillText(text, rectX + currentWidth / 2, textY);
             }
-            
+
             ctx.globalAlpha = 1;
         });
     }
@@ -550,9 +713,15 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = shapes.length - 1; i >= 0; i--) {
             const shape = shapes[i];
             if (shape.type === 'table') {
-                const closestX = Math.max(shape.x, Math.min(guest.x, shape.x + shape.width));
-                const closestY = Math.max(shape.y, Math.min(guest.y, shape.y + shape.height));
-                if (Math.sqrt((guest.x - closestX)**2 + (guest.y - closestY)**2) <= GUEST_RADIUS) return i;
+                if (shape.isRound) {
+                    const dx = guest.x - (shape.x + shape.width / 2);
+                    const dy = guest.y - (shape.y + shape.height / 2);
+                    if (dx * dx + dy * dy < Math.pow(shape.width / 2 + GUEST_RADIUS, 2)) return i;
+                } else {
+                    const closestX = Math.max(shape.x, Math.min(guest.x, shape.x + shape.width));
+                    const closestY = Math.max(shape.y, Math.min(guest.y, shape.y + shape.height));
+                    if (Math.sqrt(Math.pow(guest.x - closestX, 2) + Math.pow(guest.y - closestY, 2)) <= GUEST_RADIUS) return i;
+                }
             }
         }
         return -1;
@@ -560,7 +729,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSeatedGuestsMap() {
         seatedGuestsMap.clear();
-        shapes.forEach((_, index) => { if (shapes[index].type === 'table') seatedGuestsMap.set(index, []); });
+        shapes.forEach((_, index) => {
+            if (shapes[index].type === 'table') seatedGuestsMap.set(index, []);
+        });
         placedGuests.forEach(guest => {
             const tableIndex = getTableForGuest(guest);
             if (tableIndex !== -1) seatedGuestsMap.get(tableIndex).push(guest.id);
@@ -596,9 +767,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     guestListContainer.addEventListener('dragover', e => e.preventDefault());
-    
+
     guestListContainer.addEventListener('drop', e => {
-        if(selectedGuestIndex !== null) {
+        if (selectedGuestIndex !== null) {
             const guest = placedGuests[selectedGuestIndex];
             guest.seated = false;
             placedGuests.splice(selectedGuestIndex, 1);
@@ -638,7 +809,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadPlanButton.addEventListener('click', () => loadFileInput.click());
-    
+
     loadFileInput.addEventListener('change', (event) => {
         const file = event.target.files[0];
         if (!file) return;
@@ -662,15 +833,20 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file);
         loadFileInput.value = '';
     });
-    
+
     // --- UI Animations & Initial Setup ---
     const toolbarButtons = document.querySelectorAll('#toolbar button');
     let closeTimeout = null;
 
     toolbarButtons.forEach(button => {
         button.addEventListener('mouseenter', () => {
-            if (closeTimeout) { clearTimeout(closeTimeout); closeTimeout = null; }
-            toolbarButtons.forEach(btn => { if (btn !== button) btn.classList.remove('expanded'); });
+            if (closeTimeout) {
+                clearTimeout(closeTimeout);
+                closeTimeout = null;
+            }
+            toolbarButtons.forEach(btn => {
+                if (btn !== button) btn.classList.remove('expanded');
+            });
             button.classList.add('expanded');
         });
         button.addEventListener('mouseleave', () => {
@@ -680,18 +856,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- PDF Export ---
     function exportToPdf() {
-        const { jsPDF } = window.jspdf;
+        const {
+            jsPDF
+        } = window.jspdf;
         const doc = new jsPDF({
             orientation: 'landscape',
             unit: 'px',
             format: [canvas.width, canvas.height]
         });
 
-        // Draw with a white background for the PDF
         redrawCanvas(true);
         const canvasImage = canvas.toDataURL('image/png', 1.0);
         doc.addImage(canvasImage, 'PNG', 0, 0, canvas.width, canvas.height);
-        redrawCanvas(); // Redraw for the screen
+        redrawCanvas();
 
         doc.addPage();
         doc.setFontSize(20);
@@ -711,7 +888,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (guest) {
                             doc.text(`${guest.firstName} ${guest.lastName}`, 30, yPos);
                             yPos += 15;
-                            if (yPos > 550) { // Check for page break
+                            if (yPos > 550) {
                                 doc.addPage();
                                 yPos = 20;
                             }
@@ -727,9 +904,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     exportPdfButton.addEventListener('click', exportToPdf);
 
+    // --- Keyboard Listeners ---
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift') {
+            shiftPressed = true;
+        }
+    });
+    window.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift') {
+            shiftPressed = false;
+        }
+    });
+
     setMode('select');
     renderGuestList();
     redrawCanvas();
 
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawCanvas);
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redrawCanvas(false));
 });

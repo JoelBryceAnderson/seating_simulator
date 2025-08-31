@@ -43,10 +43,6 @@
                     <span class="icon"></span>
                     <span class="label">Draw Barrier</span>
                 </button>
-                <button id="delete-selected" title="Delete Selected" disabled>
-                    <span class="icon"></span>
-                    <span class="label">Delete</span>
-                </button>
                 <button id="clear-canvas" title="Clear All">
                     <span class="icon"></span>
                     <span class="label">Clear All</span>
@@ -67,6 +63,16 @@
             <canvas id="floor-plan" width="800" height="600"></canvas>
             <input type="file" id="load-file-input" style="display: none;" accept=".json">
         </div>
+    </div>
+    <div id="trash-can-container" class="trash-can-container">
+        <div class="trash-can-icon"></div>
+    </div>
+    <div id="context-menu" class="context-menu" style="display: none;">
+        <ul>
+            <li id="context-edit-details">Edit Details</li>
+            <li id="context-toggle-shape">Toggle Shape</li>
+            <li id="context-delete-item">Delete</li>
+        </ul>
     </div>
 </body>
 </html>

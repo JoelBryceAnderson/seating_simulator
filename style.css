@@ -201,19 +201,6 @@ button:disabled {
     transform: none;
 }
 
-#delete-selected {
-    background-color: transparent;
-    color: inherit;
-    border-color: var(--border-color);
-}
-#delete-selected:hover:not(:disabled) .icon {
-    filter: invert(33%) sepia(88%) saturate(2912%) hue-rotate(340deg) brightness(93%) contrast(91%);
-}
-#delete-selected:hover:not(:disabled) {
-    border-color: var(--danger-color);
-    color: var(--danger-color);
-}
-
 /* Custom File Input Styles */
 input[type="file"] {
     display: none;
@@ -254,6 +241,105 @@ hr {
     border: none;
     border-top: 1px solid #f5f5f5;
     margin: 1.5rem 0;
+}
+
+/* --- Enhancements --- */
+
+/* Canvas Grid */
+#floor-plan {
+    background-image:
+        linear-gradient(var(--canvas-grid) 1px, transparent 1px),
+        linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+/* Custom Scrollbar for Guest List */
+#guest-list::-webkit-scrollbar {
+    width: 8px;
+}
+#guest-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+#guest-list::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 10px;
+    border: 2px solid var(--panel-bg);
+}
+#guest-list::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+/* Accessibility Focus Styles */
+button:focus-visible,
+.file-input-label:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* --- Context Menu --- */
+.context-menu {
+    position: absolute;
+    z-index: 1000;
+    width: 200px;
+    background-color: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px var(--shadow-color);
+    padding: 0.5rem 0;
+}
+.context-menu ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.context-menu li {
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.context-menu li:hover {
+    background-color: var(--bg-color);
+}
+
+/* --- Trash Can --- */
+.trash-can-container {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background-color: var(--panel-bg);
+    box-shadow: 0 8px 24px var(--shadow-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transform: translateY(120px);
+    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), background-color 0.3s;
+}
+.trash-can-container.visible {
+    transform: translateY(0);
+}
+.trash-can-container.hover {
+    background-color: var(--danger-color);
+}
+.trash-can-icon {
+    width: 24px;
+    height: 24px;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>');
+    transition: transform 0.2s ease-in-out;
+}
+.trash-can-container.hover .trash-can-icon {
+    transform: scale(1.1);
+}
+.trash-can-container.deleting .trash-can-icon {
+    animation: shake 0.5s;
+}
+@keyframes shake {
+    10%, 90% { transform: translate3d(-1px, 0, 0); }
+    20%, 80% { transform: translate3d(2px, 0, 0); }
+    30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+    40%, 60% { transform: translate3d(4px, 0, 0); }
 }
 
 /* Dark Mode Styles */

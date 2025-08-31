@@ -5,8 +5,13 @@ This is a web-based application for creating and managing wedding seating charts
 ## Features
 
 - **Import Guest List**: Load your guest list from a CSV file. The application automatically groups guests by party and assigns unique colors for easy identification.
-- **Visual Floor Plan**: Draw and arrange tables and barriers on a canvas to replicate your venue's layout.
-- **Drag & Drop Seating**: Easily assign guests to tables by dragging them from the unseated list onto a table on the floor plan.
+- **Visual Floor Plan**: 
+    - Draw and arrange tables and barriers on a canvas to replicate your venue's layout.
+    - Right-click on elements to access a context menu for quick actions like editing details or deleting items.
+    - Support for both rectangular and circular tables.
+- **Drag & Drop Seating**: 
+    - Easily assign guests to tables by dragging them from the unseated list onto a table on the floor plan.
+    - A trash can icon appears when dragging guests or tables, allowing for easy removal.
 - **Table Management**: Set custom names and capacities for each table. The UI will indicate if a table is over-capacity.
 - **Save & Load**: Save your entire seating plan, including the guest list, floor plan, and assignments, to a JSON file. You can load this file later to continue your work.
 - **PDF Export**: Export your floor plan and a detailed seating legend to a PDF document, perfect for sharing or printing.
@@ -35,7 +40,8 @@ This is a web-based application for creating and managing wedding seating charts
 
 3.  **Design Your Floor Plan**:
     - Use the **Draw Table** and **Draw Barrier** tools to create the layout of your venue on the canvas.
-    - Double-click a table to set its name and capacity.
+    - To draw a circular table, hold down the **Shift** key while drawing.
+    - Right-click a table to set its name and capacity or to delete it.
 
 4.  **Seat Your Guests**:
     - Drag a guest's name from the list and drop them onto a table. A colored circle representing the guest will appear on the canvas.

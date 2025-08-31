@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const GUEST_RADIUS = 15;
     let animationLoopRunning = false;
     let shiftPressed = false;
+    let isOverTrash = false;
 
     // --- Helper Functions ---
     const lerp = (start, end, amt) => (1 - amt) * start + amt * end;
@@ -355,58 +356,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
-        // --- Collision Detection and Highlighting ---
-        if (isDraggingShape || isDraggingGuest) {
-            trashCanContainer.classList.add('visible');
-            
-            const trashRect = trashCanContainer.getBoundingClientRect();
-            const canvasRect = canvas.getBoundingClientRect();
-            
-            // Calculate trashRect relative to the canvas
-            const relativeTrashRect = {
-                x: trashRect.left - canvasRect.left,
-                y: trashRect.top - canvasRect.top,
-                width: trashRect.width,
-                height: trashRect.height
-            };
-
-            let itemRect;
-            if (isDraggingShape && shapes[selectedShapeIndex]) {
-                const shape = shapes[selectedShapeIndex];
-                itemRect = { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
-            } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
-                const guest = placedGuests[selectedGuestIndex];
-                itemRect = { x: guest.x - GUEST_RADIUS, y: guest.y - GUEST_RADIUS, width: GUEST_RADIUS * 2, height: GUEST_RADIUS * 2 };
-            }
-
-            const isOverlapping = itemRect && !(itemRect.x > relativeTrashRect.x + relativeTrashRect.width ||
-                                              itemRect.x + itemRect.width < relativeTrashRect.x ||
-                                              itemRect.y > relativeTrashRect.y + relativeTrashRect.height ||
-                                              itemRect.y + itemRect.height < relativeTrashRect.y);
-            
-            trashCanContainer.classList.toggle('hover', isOverlapping);
-
-            // --- Update Deletion State for All Affected Items ---
-            shapes.forEach(s => s.isDeleting = false);
-            placedGuests.forEach(g => g.isDeleting = false);
-
-            if (isOverlapping) {
-                if (isDraggingShape && shapes[selectedShapeIndex]) {
-                    const shape = shapes[selectedShapeIndex];
-                    shape.isDeleting = true;
-                    // Highlight guests on the table being deleted
-                    const guestIds = seatedGuestsMap.get(selectedShapeIndex) || [];
-                    guestIds.forEach(guestId => {
-                        const guest = allGuests.find(g => g.id === guestId);
-                        if (guest) guest.isDeleting = true;
-                    });
-                } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
-                    placedGuests[selectedGuestIndex].isDeleting = true;
-                }
-            }
-        }
-
-        // --- Handle Drawing, Dragging, and Hovering ---
         if (isDrawing) {
             redrawCanvas();
             ctx.strokeStyle = 'rgba(0, 122, 255, 0.8)';
@@ -454,59 +403,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        let wasDeleting = false;
-        if (isDraggingShape && shapes[selectedShapeIndex]) {
-            wasDeleting = shapes[selectedShapeIndex].isDeleting;
-        } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
-            wasDeleting = placedGuests[selectedGuestIndex].isDeleting;
-        }
+        const wasDragging = isDraggingShape || isDraggingGuest;
 
         if (isDrawing) {
-            isDrawing = false;
-            const rect = canvas.getBoundingClientRect();
-            const endX = e.clientX - rect.left;
-            const endY = e.clientY - rect.top;
-            addShape(endX, endY);
-        } else if (isDraggingShape || isDraggingGuest) {
-            if (wasDeleting) {
-                trashCanContainer.classList.add('deleting');
-                setTimeout(() => {
-                    if (isDraggingShape) {
-                        deleteShape(selectedShapeIndex);
-                    } else {
-                        unseatGuest(selectedGuestIndex);
-                    }
-                    trashCanContainer.classList.remove('deleting');
-                    // Reset all states after deletion
-                    isDraggingShape = false;
-                    isDraggingGuest = false;
-                    trashCanContainer.classList.remove('visible', 'hover');
-                    shapes.forEach(s => s.isDeleting = false);
-                    placedGuests.forEach(g => g.isDeleting = false);
-                    redrawCanvas();
-                }, 500);
-            } else {
-                // This is the 'drop' case for non-deletion
-                isDraggingShape = false;
-                isDraggingGuest = false;
-                trashCanContainer.classList.remove('visible', 'hover');
-                shapes.forEach(s => s.isDeleting = false);
-                placedGuests.forEach(g => g.isDeleting = false);
-                updateSeatedGuestsMap();
-                redrawCanvas();
+            addShape(e.clientX - canvas.getBoundingClientRect().left, e.clientY - canvas.getBoundingClientRect().top);
+        } else if (wasDragging && isOverTrash) {
+            trashCanContainer.classList.add('deleting');
+            if (isDraggingShape) {
+                deleteShape(selectedShapeIndex);
+            } else if (isDraggingGuest) {
+                unseatGuest(selectedGuestIndex);
             }
+            setTimeout(() => trashCanContainer.classList.remove('deleting'), 500);
+        } else if (wasDragging) {
+            updateSeatedGuestsMap();
         }
-        
-        // Final state reset to prevent getting stuck
+
+        // --- Guaranteed State Reset ---
         isDrawing = false;
         isDraggingShape = false;
         isDraggingGuest = false;
-        if (!wasDeleting) {
-            trashCanContainer.classList.remove('visible', 'hover');
-            shapes.forEach(s => s.isDeleting = false);
-            placedGuests.forEach(g => g.isDeleting = false);
-            redrawCanvas();
-        }
+        selectedShapeIndex = null;
+        selectedGuestIndex = null;
+        trashCanContainer.classList.remove('visible', 'hover');
+        isOverTrash = false;
+        
+        redrawCanvas();
     });
 
     // --- Context Menu ---
@@ -599,7 +521,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const guest = placedGuests[guestIndex];
         guest.seated = false;
         placedGuests.splice(guestIndex, 1);
-        selectedGuestIndex = null;
         updateSeatedGuestsMap();
         renderGuestList();
     }
@@ -617,7 +538,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         }
-        selectedShapeIndex = null;
         updateSeatedGuestsMap();
         renderGuestList();
     }
@@ -658,6 +578,34 @@ document.addEventListener('DOMContentLoaded', () => {
     function redrawCanvas(forExport = false) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const panelBg = getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
+        const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
+
+        if (isDraggingShape || isDraggingGuest) {
+            trashCanContainer.classList.add('visible');
+            const trashRect = trashCanContainer.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            const relativeTrashRect = {
+                x: trashRect.left - canvasRect.left,
+                y: trashRect.top - canvasRect.top,
+                width: trashRect.width,
+                height: trashRect.height
+            };
+
+            let itemRect;
+            if (isDraggingShape && shapes[selectedShapeIndex]) {
+                const shape = shapes[selectedShapeIndex];
+                itemRect = { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+            } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
+                const guest = placedGuests[selectedGuestIndex];
+                itemRect = { x: guest.x - GUEST_RADIUS, y: guest.y - GUEST_RADIUS, width: GUEST_RADIUS * 2, height: GUEST_RADIUS * 2 };
+            }
+            
+            isOverTrash = itemRect && !(itemRect.x > relativeTrashRect.x + relativeTrashRect.width ||
+                                       itemRect.x + itemRect.width < relativeTrashRect.x ||
+                                       itemRect.y > relativeTrashRect.y + relativeTrashRect.height ||
+                                       itemRect.y + itemRect.height < relativeTrashRect.y);
+            trashCanContainer.classList.toggle('hover', isOverTrash);
+        }
 
         if (forExport) {
             ctx.fillStyle = '#FFFFFF';
@@ -667,12 +615,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim();
         const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
         const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim();
-        const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
 
         shapes.forEach((shape, index) => {
-            if (!shape) return;
             const isSelected = selectedShapeIndex === index;
-            const isDeleting = shape.isDeleting;
+            const isDeleting = isOverTrash && isSelected;
+            if (isDeleting) {
+                const guestIds = seatedGuestsMap.get(index) || [];
+                guestIds.forEach(guestId => {
+                    const guest = allGuests.find(g => g.id === guestId);
+                    if (guest) guest.isDeleting = true;
+                });
+            }
 
             ctx.lineWidth = isSelected ? 3 : 2;
             ctx.strokeStyle = isDeleting ? dangerColor : (isSelected ? primaryColor : '#D1D5DB');
@@ -680,7 +633,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (shape.type === 'table') {
                 const seatedCount = seatedGuestsMap.get(index)?.length || 0;
                 ctx.fillStyle = isDeleting ? 'rgba(255, 69, 58, 0.2)' : (seatedCount > (shape.capacity || 8) ? '#FEF2F2' : panelBg);
-
                 if (shape.isRound) {
                     ctx.beginPath();
                     ctx.arc(shape.x + shape.width / 2, shape.y + shape.height / 2, shape.width / 2, 0, Math.PI * 2);
@@ -690,12 +642,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
                     ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
                 }
-
                 ctx.fillStyle = textColor;
                 ctx.font = 'bold 14px "Playfair Display", serif';
                 ctx.textAlign = 'center';
                 ctx.fillText(shape.label || 'Table', shape.x + shape.width / 2, shape.y + shape.height / 2 - 10);
-
                 ctx.font = '12px "Playfair Display", serif';
                 ctx.fillStyle = textMuted;
                 ctx.fillText(`${seatedCount} / ${shape.capacity || 8}`, shape.x + shape.width / 2, shape.y + shape.height / 2 + 10);
@@ -707,70 +657,59 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        const sortedGuests = [...placedGuests].sort((a, b) => a.hoverProgress - b.hoverProgress);
-
-        sortedGuests.forEach(guest => {
-            const isDeleting = guest.isDeleting;
+        placedGuests.forEach((guest, index) => {
+            const isSelected = selectedGuestIndex === index;
+            const isDeleting = (isOverTrash && isSelected) || guest.isDeleting;
             const progress = forExport ? 0 : guest.hoverProgress;
-
             const largeFont = 'bold 14px "Playfair Display", serif';
             const smallFont = 'bold 11px "Playfair Display", serif';
             const text = `${guest.firstName} ${guest.lastName}`;
-
             ctx.font = largeFont;
             const textMetrics = ctx.measureText(text);
             const targetWidth = textMetrics.width + 20;
             const startWidth = GUEST_RADIUS * 2;
             const currentWidth = lerp(startWidth, targetWidth, progress);
             const currentHeight = GUEST_RADIUS * 2;
-
             let rectX = guest.x - currentWidth / 2;
             let rectY = guest.y - currentHeight / 2;
-
             if (rectX < 0) rectX = 0;
             if (rectX + currentWidth > canvas.width) rectX = canvas.width - currentWidth;
             if (rectY < 0) rectY = 0;
             if (rectY + currentHeight > canvas.height) rectY = canvas.height - currentHeight;
-
             const startRadius = GUEST_RADIUS;
             const endRadius = 8;
             const currentRadius = lerp(startRadius, endRadius, progress);
-
             ctx.lineWidth = 2;
             ctx.strokeStyle = isDeleting ? dangerColor : getColorForPartyId(guest.partyId, true);
             ctx.fillStyle = isDeleting ? 'rgba(255, 69, 58, 0.2)' : (guest.isPlusOne ? '#ffffff' : getColorForPartyId(guest.partyId, false));
             ctx.shadowColor = `rgba(0,0,0,${lerp(0.1, 0.2, progress)})`;
             ctx.shadowBlur = lerp(4, 8, progress);
             ctx.shadowOffsetY = lerp(2, 4, progress);
-
             ctx.beginPath();
             ctx.roundRect(rectX, rectY, currentWidth, currentHeight, currentRadius);
             ctx.fill();
             ctx.stroke();
-
             ctx.shadowColor = 'transparent';
-
             ctx.fillStyle = isDeleting ? dangerColor : '#111827';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-
             const initials = (guest.isPlusOne && guest.plusOneIndex) ? `+${guest.plusOneIndex}` : `${guest.firstName[0] || ''}${guest.lastName[0] || ''}`;
             const textY = rectY + currentHeight / 2;
-
             if (progress < 0.5) {
                 ctx.globalAlpha = 1 - (progress * 2);
                 ctx.font = smallFont;
                 ctx.fillText(initials, guest.x, textY);
             }
-
             if (progress > 0.5) {
                 ctx.globalAlpha = (progress - 0.5) * 2;
                 ctx.font = largeFont;
                 ctx.fillText(text, rectX + currentWidth / 2, textY);
             }
-
             ctx.globalAlpha = 1;
         });
+        
+        // Reset temporary deletion flags after drawing
+        allGuests.forEach(g => g.isDeleting = false);
     }
 
     // --- Drag and Drop Logic ---

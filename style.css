@@ -324,7 +324,6 @@ button:focus-visible,
 .trash-can-container.visible {
     transform: scale(1);
     opacity: 1;
-    pointer-events: auto;
 }
 .trash-can-container.hover {
     background-color: var(--danger-color);

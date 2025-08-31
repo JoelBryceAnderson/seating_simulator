@@ -402,10 +402,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        const wasDragging = isDraggingShape || isDraggingGuest;
+        const endX = e.clientX - canvas.getBoundingClientRect().left;
+        const endY = e.clientY - canvas.getBoundingClientRect().top;
+        // A small threshold to differentiate a click from a drag
+        const wasMoved = Math.abs(endX - startX) > 5 || Math.abs(endY - startY) > 5;
 
-        if (isDrawing) {
-            addShape(e.clientX - canvas.getBoundingClientRect().left, e.clientY - canvas.getBoundingClientRect().top);
+        const wasDragging = (isDraggingShape || isDraggingGuest) && wasMoved;
+        const wasDrawing = isDrawing && wasMoved;
+
+        if (wasDrawing) {
+            addShape(endX, endY);
         } else if (wasDragging && trashCanContainer.classList.contains('hover')) {
             trashCanContainer.classList.add('deleting');
             if (isDraggingShape) {
@@ -418,13 +424,18 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSeatedGuestsMap();
         }
 
-        // --- Guaranteed State Reset ---
+        // --- Guaranteed State Reset for flags ---
         isDrawing = false;
         isDraggingShape = false;
         isDraggingGuest = false;
-        selectedShapeIndex = null;
-        selectedGuestIndex = null;
         trashCanContainer.classList.remove('visible', 'hover');
+        
+        // --- Conditional selection reset ---
+        // Deselect only if the mouse was dragged
+        if (wasMoved) {
+            selectedShapeIndex = null;
+            selectedGuestIndex = null;
+        }
         
         redrawCanvas();
     });

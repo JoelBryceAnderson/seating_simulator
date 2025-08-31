@@ -662,7 +662,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        placedGuests.forEach((guest, index) => {
+        const guestsToDraw = [...placedGuests];
+        if (hoveredGuest) {
+            const hoveredIdx = guestsToDraw.findIndex(g => g.id === hoveredGuest.id);
+            if (hoveredIdx > -1) {
+                const [hoveredItem] = guestsToDraw.splice(hoveredIdx, 1);
+                guestsToDraw.push(hoveredItem);
+            }
+        }
+
+        guestsToDraw.forEach((guest) => {
+            const index = placedGuests.findIndex(g => g.id === guest.id);
             const isSelected = selectedGuestIndex === index;
             let isDeleting = isOverTrash && isSelected;
 

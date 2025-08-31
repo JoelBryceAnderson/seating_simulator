@@ -355,6 +355,58 @@ document.addEventListener('DOMContentLoaded', () => {
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
+        // --- Collision Detection and Highlighting ---
+        if (isDraggingShape || isDraggingGuest) {
+            trashCanContainer.classList.add('visible');
+            
+            const trashRect = trashCanContainer.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            
+            // Calculate trashRect relative to the canvas
+            const relativeTrashRect = {
+                x: trashRect.left - canvasRect.left,
+                y: trashRect.top - canvasRect.top,
+                width: trashRect.width,
+                height: trashRect.height
+            };
+
+            let itemRect;
+            if (isDraggingShape && shapes[selectedShapeIndex]) {
+                const shape = shapes[selectedShapeIndex];
+                itemRect = { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+            } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
+                const guest = placedGuests[selectedGuestIndex];
+                itemRect = { x: guest.x - GUEST_RADIUS, y: guest.y - GUEST_RADIUS, width: GUEST_RADIUS * 2, height: GUEST_RADIUS * 2 };
+            }
+
+            const isOverlapping = itemRect && !(itemRect.x > relativeTrashRect.x + relativeTrashRect.width ||
+                                              itemRect.x + itemRect.width < relativeTrashRect.x ||
+                                              itemRect.y > relativeTrashRect.y + relativeTrashRect.height ||
+                                              itemRect.y + itemRect.height < relativeTrashRect.y);
+            
+            trashCanContainer.classList.toggle('hover', isOverlapping);
+
+            // --- Update Deletion State for All Affected Items ---
+            shapes.forEach(s => s.isDeleting = false);
+            placedGuests.forEach(g => g.isDeleting = false);
+
+            if (isOverlapping) {
+                if (isDraggingShape && shapes[selectedShapeIndex]) {
+                    const shape = shapes[selectedShapeIndex];
+                    shape.isDeleting = true;
+                    // Highlight guests on the table being deleted
+                    const guestIds = seatedGuestsMap.get(selectedShapeIndex) || [];
+                    guestIds.forEach(guestId => {
+                        const guest = allGuests.find(g => g.id === guestId);
+                        if (guest) guest.isDeleting = true;
+                    });
+                } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
+                    placedGuests[selectedGuestIndex].isDeleting = true;
+                }
+            }
+        }
+
+        // --- Handle Drawing, Dragging, and Hovering ---
         if (isDrawing) {
             redrawCanvas();
             ctx.strokeStyle = 'rgba(0, 122, 255, 0.8)';
@@ -371,13 +423,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const shape = shapes[selectedShapeIndex];
             const prevX = shape.x;
             const prevY = shape.y;
-            
             shape.x = mouseX - selectionOffsetX;
             shape.y = mouseY - selectionOffsetY;
-            
             const dx = shape.x - prevX;
             const dy = shape.y - prevY;
-
             if (dx !== 0 || dy !== 0) {
                 const guestIds = seatedGuestsMap.get(selectedShapeIndex) || [];
                 guestIds.forEach(guestId => {
@@ -388,22 +437,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             }
-
-            const trashCanRect = trashCanContainer.getBoundingClientRect();
-            const canvasRect = canvas.getBoundingClientRect();
-            const trashX = trashCanRect.left - canvasRect.left;
-            const trashY = trashCanRect.top - canvasRect.top;
-            trashCanContainer.classList.toggle('hover', (mouseX > trashX && mouseX < trashX + trashCanRect.width && mouseY > trashY && mouseY < trashY + trashCanRect.height));
             redrawCanvas();
         } else if (isDraggingGuest) {
             const guest = placedGuests[selectedGuestIndex];
             guest.x = mouseX - selectionOffsetX;
             guest.y = mouseY - selectionOffsetY;
-            const trashCanRect = trashCanContainer.getBoundingClientRect();
-            const canvasRect = canvas.getBoundingClientRect();
-            const trashX = trashCanRect.left - canvasRect.left;
-            const trashY = trashCanRect.top - canvasRect.top;
-            trashCanContainer.classList.toggle('hover', (mouseX > trashX && mouseX < trashX + trashCanRect.width && mouseY > trashY && mouseY < trashY + trashCanRect.height));
             redrawCanvas();
         } else {
             const guestIndex = getGuestAt(mouseX, mouseY);
@@ -416,15 +454,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     canvas.addEventListener('mouseup', (e) => {
+        let wasDeleting = false;
+        if (isDraggingShape && shapes[selectedShapeIndex]) {
+            wasDeleting = shapes[selectedShapeIndex].isDeleting;
+        } else if (isDraggingGuest && placedGuests[selectedGuestIndex]) {
+            wasDeleting = placedGuests[selectedGuestIndex].isDeleting;
+        }
+
         if (isDrawing) {
             isDrawing = false;
             const rect = canvas.getBoundingClientRect();
             const endX = e.clientX - rect.left;
             const endY = e.clientY - rect.top;
             addShape(endX, endY);
-        }
-        if (isDraggingShape || isDraggingGuest) {
-            if (trashCanContainer.classList.contains('hover')) {
+        } else if (isDraggingShape || isDraggingGuest) {
+            if (wasDeleting) {
                 trashCanContainer.classList.add('deleting');
                 setTimeout(() => {
                     if (isDraggingShape) {
@@ -433,18 +477,35 @@ document.addEventListener('DOMContentLoaded', () => {
                         unseatGuest(selectedGuestIndex);
                     }
                     trashCanContainer.classList.remove('deleting');
+                    // Reset all states after deletion
                     isDraggingShape = false;
                     isDraggingGuest = false;
                     trashCanContainer.classList.remove('visible', 'hover');
+                    shapes.forEach(s => s.isDeleting = false);
+                    placedGuests.forEach(g => g.isDeleting = false);
                     redrawCanvas();
                 }, 500);
             } else {
+                // This is the 'drop' case for non-deletion
                 isDraggingShape = false;
                 isDraggingGuest = false;
                 trashCanContainer.classList.remove('visible', 'hover');
+                shapes.forEach(s => s.isDeleting = false);
+                placedGuests.forEach(g => g.isDeleting = false);
                 updateSeatedGuestsMap();
                 redrawCanvas();
             }
+        }
+        
+        // Final state reset to prevent getting stuck
+        isDrawing = false;
+        isDraggingShape = false;
+        isDraggingGuest = false;
+        if (!wasDeleting) {
+            trashCanContainer.classList.remove('visible', 'hover');
+            shapes.forEach(s => s.isDeleting = false);
+            placedGuests.forEach(g => g.isDeleting = false);
+            redrawCanvas();
         }
     });
 
@@ -458,8 +519,8 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedShapeIndex = getShapeAt(x, y);
 
         if (selectedGuestIndex !== null || selectedShapeIndex !== null) {
-            contextMenu.style.left = `${e.clientX}px`;
-            contextMenu.style.top = `${e.clientY}px`;
+            contextMenu.style.left = `${e.pageX}px`;
+            contextMenu.style.top = `${e.pageY}px`;
             contextMenu.style.display = 'block';
             const isTable = selectedShapeIndex !== null && shapes[selectedShapeIndex].type === 'table';
             document.getElementById('context-toggle-shape').style.display = isTable ? 'block' : 'none';
@@ -606,16 +667,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim();
         const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
         const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim();
+        const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
 
         shapes.forEach((shape, index) => {
             if (!shape) return;
             const isSelected = selectedShapeIndex === index;
+            const isDeleting = shape.isDeleting;
+
             ctx.lineWidth = isSelected ? 3 : 2;
-            ctx.strokeStyle = isSelected ? primaryColor : '#D1D5DB';
+            ctx.strokeStyle = isDeleting ? dangerColor : (isSelected ? primaryColor : '#D1D5DB');
 
             if (shape.type === 'table') {
                 const seatedCount = seatedGuestsMap.get(index)?.length || 0;
-                ctx.fillStyle = seatedCount > (shape.capacity || 8) ? '#FEF2F2' : panelBg;
+                ctx.fillStyle = isDeleting ? 'rgba(255, 69, 58, 0.2)' : (seatedCount > (shape.capacity || 8) ? '#FEF2F2' : panelBg);
 
                 if (shape.isRound) {
                     ctx.beginPath();
@@ -636,8 +700,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fillStyle = textMuted;
                 ctx.fillText(`${seatedCount} / ${shape.capacity || 8}`, shape.x + shape.width / 2, shape.y + shape.height / 2 + 10);
             } else {
-                ctx.fillStyle = '#374151';
-                ctx.strokeStyle = '#4B5563';
+                ctx.fillStyle = isDeleting ? 'rgba(255, 69, 58, 0.5)' : '#374151';
+                ctx.strokeStyle = isDeleting ? dangerColor : '#4B5563';
                 ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
                 ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
             }
@@ -646,6 +710,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sortedGuests = [...placedGuests].sort((a, b) => a.hoverProgress - b.hoverProgress);
 
         sortedGuests.forEach(guest => {
+            const isDeleting = guest.isDeleting;
             const progress = forExport ? 0 : guest.hoverProgress;
 
             const largeFont = 'bold 14px "Playfair Display", serif';
@@ -672,8 +737,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentRadius = lerp(startRadius, endRadius, progress);
 
             ctx.lineWidth = 2;
-            ctx.strokeStyle = getColorForPartyId(guest.partyId, true);
-            ctx.fillStyle = guest.isPlusOne ? '#ffffff' : getColorForPartyId(guest.partyId, false);
+            ctx.strokeStyle = isDeleting ? dangerColor : getColorForPartyId(guest.partyId, true);
+            ctx.fillStyle = isDeleting ? 'rgba(255, 69, 58, 0.2)' : (guest.isPlusOne ? '#ffffff' : getColorForPartyId(guest.partyId, false));
             ctx.shadowColor = `rgba(0,0,0,${lerp(0.1, 0.2, progress)})`;
             ctx.shadowBlur = lerp(4, 8, progress);
             ctx.shadowOffsetY = lerp(2, 4, progress);
@@ -685,7 +750,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             ctx.shadowColor = 'transparent';
 
-            ctx.fillStyle = '#111827';
+            ctx.fillStyle = isDeleting ? dangerColor : '#111827';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 

@@ -60,12 +60,14 @@
                     <span class="label">Load</span>
                 </button>
             </div>
-            <canvas id="floor-plan" width="800" height="600"></canvas>
+            <div style="position: relative; display: inline-block; line-height: 0;">
+                <canvas id="floor-plan" width="800" height="600"></canvas>
+                <div id="trash-can-container" class="trash-can-container">
+                    <div class="trash-can-icon"></div>
+                </div>
+            </div>
             <input type="file" id="load-file-input" style="display: none;" accept=".json">
         </div>
-    </div>
-    <div id="trash-can-container" class="trash-can-container">
-        <div class="trash-can-icon"></div>
     </div>
     <div id="context-menu" class="context-menu" style="display: none;">
         <ul>

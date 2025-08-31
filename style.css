@@ -116,6 +116,7 @@ h1 {
 
 #floor-plan-container {
     flex-grow: 1;
+    position: relative;
 }
 
 #floor-plan {
@@ -303,22 +304,27 @@ button:focus-visible,
 
 /* --- Trash Can --- */
 .trash-can-container {
-    position: fixed;
-    bottom: 2rem;
-    right: 2rem;
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
     width: 60px;
     height: 60px;
+    z-index: 10;
     border-radius: 50%;
     background-color: var(--panel-bg);
     box-shadow: 0 8px 24px var(--shadow-color);
     display: flex;
     justify-content: center;
     align-items: center;
-    transform: translateY(120px);
-    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), background-color 0.3s;
+    transform: scale(0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55), opacity 0.2s, background-color 0.3s;
 }
 .trash-can-container.visible {
-    transform: translateY(0);
+    transform: scale(1);
+    opacity: 1;
+    pointer-events: auto;
 }
 .trash-can-container.hover {
     background-color: var(--danger-color);
@@ -398,6 +404,10 @@ button:focus-visible,
 
     button:hover {
         border-color: #666;
+    }
+    
+    .trash-can-icon {
+        filter: invert(1);
     }
 
     button.active, button:active {

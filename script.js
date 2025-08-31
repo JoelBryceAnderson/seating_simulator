@@ -51,7 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const GUEST_RADIUS = 15;
     let animationLoopRunning = false;
     let shiftPressed = false;
-    let isOverTrash = false;
 
     // --- Helper Functions ---
     const lerp = (start, end, amt) => (1 - amt) * start + amt * end;
@@ -407,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isDrawing) {
             addShape(e.clientX - canvas.getBoundingClientRect().left, e.clientY - canvas.getBoundingClientRect().top);
-        } else if (wasDragging && isOverTrash) {
+        } else if (wasDragging && trashCanContainer.classList.contains('hover')) {
             trashCanContainer.classList.add('deleting');
             if (isDraggingShape) {
                 deleteShape(selectedShapeIndex);
@@ -426,7 +425,6 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedShapeIndex = null;
         selectedGuestIndex = null;
         trashCanContainer.classList.remove('visible', 'hover');
-        isOverTrash = false;
         
         redrawCanvas();
     });
@@ -518,6 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Deletion and Selection ---
     function unseatGuest(guestIndex) {
+        if (guestIndex === null || guestIndex >= placedGuests.length) return;
         const guest = placedGuests[guestIndex];
         guest.seated = false;
         placedGuests.splice(guestIndex, 1);
@@ -526,6 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function deleteShape(shapeIndex) {
+        if (shapeIndex === null || shapeIndex >= shapes.length) return;
         const deletedShape = shapes.splice(shapeIndex, 1)[0];
         if (deletedShape.type === 'table') {
             const guestsToUnseat = seatedGuestsMap.get(shapeIndex) || [];
@@ -577,9 +577,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Canvas Drawing ---
     function redrawCanvas(forExport = false) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const panelBg = getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
-        const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
-
+        
+        let isOverTrash = false;
         if (isDraggingShape || isDraggingGuest) {
             trashCanContainer.classList.add('visible');
             const trashRect = trashCanContainer.getBoundingClientRect();
@@ -607,6 +606,8 @@ document.addEventListener('DOMContentLoaded', () => {
             trashCanContainer.classList.toggle('hover', isOverTrash);
         }
 
+        const panelBg = getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
+        const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
         if (forExport) {
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -619,14 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         shapes.forEach((shape, index) => {
             const isSelected = selectedShapeIndex === index;
             const isDeleting = isOverTrash && isSelected;
-            if (isDeleting) {
-                const guestIds = seatedGuestsMap.get(index) || [];
-                guestIds.forEach(guestId => {
-                    const guest = allGuests.find(g => g.id === guestId);
-                    if (guest) guest.isDeleting = true;
-                });
-            }
-
+            
             ctx.lineWidth = isSelected ? 3 : 2;
             ctx.strokeStyle = isDeleting ? dangerColor : (isSelected ? primaryColor : '#D1D5DB');
 
@@ -659,7 +653,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         placedGuests.forEach((guest, index) => {
             const isSelected = selectedGuestIndex === index;
-            const isDeleting = (isOverTrash && isSelected) || guest.isDeleting;
+            let isDeleting = isOverTrash && isSelected;
+
+            if (isDraggingShape && shapes[selectedShapeIndex] && isOverTrash) {
+                const guestIds = seatedGuestsMap.get(selectedShapeIndex) || [];
+                if(guestIds.includes(guest.id)) {
+                    isDeleting = true;
+                }
+            }
+            
             const progress = forExport ? 0 : guest.hoverProgress;
             const largeFont = 'bold 14px "Playfair Display", serif';
             const smallFont = 'bold 11px "Playfair Display", serif';
@@ -707,9 +709,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             ctx.globalAlpha = 1;
         });
-        
-        // Reset temporary deletion flags after drawing
-        allGuests.forEach(g => g.isDeleting = false);
     }
 
     // --- Drag and Drop Logic ---

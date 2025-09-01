@@ -6,6 +6,7 @@
     <title>Wedding Seating Chart</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <link rel="stylesheet" href="icons.css">
     <script src="script.js" defer></script>
 </head>
@@ -50,6 +51,10 @@
                 <button id="save-plan" title="Save">
                     <span class="icon"></span>
                     <span class="label">Save</span>
+                </button>
+                <button id="share-plan-button" title="Copy a shareable link to the clipboard">
+                    <span class="icon"></span>
+                    <span class="label">Share</span>
                 </button>
                 <button id="export-pdf" title="Export as PDF File">
                     <span class="icon"></span>

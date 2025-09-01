@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectToolButton = document.getElementById('select-tool');
     const clearCanvasButton = document.getElementById('clear-canvas');
     const savePlanButton = document.getElementById('save-plan');
+    const sharePlanButton = document.getElementById('share-plan-button'); // NEW SHARE BUTTON
     const loadPlanButton = document.getElementById('load-plan');
     const exportPdfButton = document.getElementById('export-pdf');
     const toolButtons = [drawTableButton, drawBarrierButton, selectToolButton];
@@ -51,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const GUEST_RADIUS = 15;
     let animationLoopRunning = false;
     let shiftPressed = false;
+    const SHARE_SIZE_LIMIT_KB = 25; // Safe limit for URL sharing
 
     // --- Helper Functions ---
     const lerp = (start, end, amt) => (1 - amt) * start + amt * end;
@@ -59,6 +61,98 @@ document.addEventListener('DOMContentLoaded', () => {
             guest.hoverProgress = 0;
         }
     };
+
+    // --- Shareable Link Functions ---
+    function generateShareableLink() {
+        const state = { version: 2, allGuests, shapes };
+        const jsonString = JSON.stringify(state);
+
+        if (new TextEncoder().encode(jsonString).length / 1024 > SHARE_SIZE_LIMIT_KB) {
+            alert("This floor plan is too large to be shared with a link. Please use the 'Save' button to create a file instead.");
+            return;
+        }
+
+        try {
+            // Step 1: Compress the data into a Uint8Array (raw binary)
+            const compressed = pako.deflate(jsonString);
+
+            // Step 2: Convert binary data to a string in a way that btoa can handle
+            const binaryString = String.fromCharCode.apply(null, compressed);
+
+            // Step 3: Encode the binary string to Base64
+            const base64 = btoa(binaryString);
+            
+            // Step 4: URL-encode the Base64 string to handle special characters like '+' and '/'
+            const urlSafeBase64 = encodeURIComponent(base64);
+
+            const url = `${window.location.href.split('#')[0]}#data=${urlSafeBase64}`;
+            
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Shareable link copied to clipboard!');
+            }, () => {
+                prompt("Failed to copy. Here is your shareable link:", url);
+            });
+        } catch (error) {
+            console.error("Failed to create shareable link:", error);
+            alert("Could not create shareable link due to an unexpected error.");
+        }
+    }
+
+    function loadPlanFromUrl() {
+        try {
+            if (window.location.hash && window.location.hash.startsWith('#data=')) {
+                // Step 1: Get the URL-safe Base64 string from the hash
+                const urlSafeBase64 = window.location.hash.substring(6);
+                
+                // Step 2: Decode the URL component
+                const base64 = decodeURIComponent(urlSafeBase64);
+
+                // Step 3: Decode Base64 to a binary string
+                const binaryString = atob(base64);
+
+                // Step 4: Convert the binary string back to a Uint8Array
+                const compressed = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    compressed[i] = binaryString.charCodeAt(i);
+                }
+
+                // Step 5: Decompress the data and decode it back to the original JSON string
+                const jsonString = pako.inflate(compressed, { to: 'string' });
+                const state = JSON.parse(jsonString);
+
+                allGuests = state.allGuests || [];
+                allGuests.forEach(initializeGuestAnimation);
+                shapes = state.shapes || [];
+                placedGuests = allGuests.filter(g => g && g.seated);
+                partyColors = {};
+                
+                updateSeatedGuestsMap();
+                renderGuestList();
+                redrawCanvas();
+                updateShareButtonState(); // Update button state after loading
+                
+                alert('Plan loaded from link!');
+                window.history.pushState("", document.title, window.location.pathname + window.location.search);
+            }
+        } catch (error) {
+            alert('Could not load plan from the link. It might be invalid or corrupted.');
+            console.error("Failed to load from URL:", error);
+        }
+    }
+
+    function updateShareButtonState() {
+        const state = { version: 2, allGuests, shapes };
+        const jsonString = JSON.stringify(state);
+        const currentSizeKB = new TextEncoder().encode(jsonString).length / 1024;
+        
+        if (currentSizeKB > SHARE_SIZE_LIMIT_KB) {
+            sharePlanButton.disabled = true;
+            sharePlanButton.title = `This plan is too large (${currentSizeKB.toFixed(1)} KB) to share via a link. Please use the Save button. Limit: ${SHARE_SIZE_LIMIT_KB} KB.`;
+        } else {
+            sharePlanButton.disabled = false;
+            sharePlanButton.title = 'Copy a shareable link to the clipboard';
+        }
+    }
 
     // --- Animation Loop ---
     function animationLoop() {
@@ -103,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 allGuests = parseRobustCSV(e.target.result);
                 allGuests.forEach(initializeGuestAnimation);
-                clearCanvasButton.click();
+                clearCanvasButton.click(); // This will also trigger updates
             } catch (error) {
                 alert(`Failed to parse CSV file: ${error.message}`);
             }
@@ -122,6 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const newGuestList = parseRobustCSV(e.target.result);
                 reconcileGuestLists(newGuestList);
+                updateShareButtonState(); // Update on change
             } catch (error) {
                 alert(`Failed to merge CSV file: ${error.message}`);
             }
@@ -303,6 +398,7 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeGuestAnimation(newGuest);
         allGuests.push(newGuest);
         renderGuestList();
+        updateShareButtonState(); // Update on change
     }
 
     // --- Mode and Tool Management ---
@@ -404,9 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.addEventListener('mouseup', (e) => {
         const endX = e.clientX - canvas.getBoundingClientRect().left;
         const endY = e.clientY - canvas.getBoundingClientRect().top;
-        // A small threshold to differentiate a click from a drag
         const wasMoved = Math.abs(endX - startX) > 5 || Math.abs(endY - startY) > 5;
-
         const wasDragging = (isDraggingShape || isDraggingGuest) && wasMoved;
         const wasDrawing = isDrawing && wasMoved;
 
@@ -414,24 +508,20 @@ document.addEventListener('DOMContentLoaded', () => {
             addShape(endX, endY);
         } else if (wasDragging && trashCanContainer.classList.contains('hover')) {
             trashCanContainer.classList.add('deleting');
-            if (isDraggingShape) {
-                deleteShape(selectedShapeIndex);
-            } else if (isDraggingGuest) {
-                unseatGuest(selectedGuestIndex);
-            }
+            if (isDraggingShape) deleteShape(selectedShapeIndex);
+            else if (isDraggingGuest) unseatGuest(selectedGuestIndex);
             setTimeout(() => trashCanContainer.classList.remove('deleting'), 500);
         } else if (wasDragging) {
             updateSeatedGuestsMap();
+            redrawCanvas();
+            updateShareButtonState();
         }
-
-        // --- Guaranteed State Reset for flags ---
+        
         isDrawing = false;
         isDraggingShape = false;
         isDraggingGuest = false;
         trashCanContainer.classList.remove('visible', 'hover');
         
-        // --- Conditional selection reset ---
-        // Deselect only if the mouse was dragged
         if (wasMoved) {
             selectedShapeIndex = null;
             selectedGuestIndex = null;
@@ -473,37 +563,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const shape = shapes[selectedShapeIndex];
             shape.isRound = !shape.isRound;
         } else if (e.target.id === 'context-delete-item') {
-            if (selectedGuestIndex !== null) {
-                unseatGuest(selectedGuestIndex);
-            } else {
-                deleteShape(selectedShapeIndex);
-            }
+            if (selectedGuestIndex !== null) unseatGuest(selectedGuestIndex);
+            else deleteShape(selectedShapeIndex);
         }
         contextMenu.style.display = 'none';
         redrawCanvas();
+        updateShareButtonState(); // Update on change
     });
 
     function addShape(endX, endY) {
         let shape;
         if (currentMode === 'draw-table' && shiftPressed) {
             const radius = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
-            shape = {
-                type: 'table',
-                x: startX - radius,
-                y: startY - radius,
-                width: radius * 2,
-                height: radius * 2,
-                isRound: true,
-            };
+            shape = { type: 'table', x: startX - radius, y: startY - radius, width: radius * 2, height: radius * 2, isRound: true };
         } else {
-            shape = {
-                type: currentMode === 'draw-barrier' ? 'barrier' : 'table',
-                x: Math.min(startX, endX),
-                y: Math.min(startY, endY),
-                width: Math.abs(endX - startX),
-                height: Math.abs(endY - startY),
-                isRound: false,
-            };
+            shape = { type: currentMode === 'draw-barrier' ? 'barrier' : 'table', x: Math.min(startX, endX), y: Math.min(startY, endY), width: Math.abs(endX - startX), height: Math.abs(endY - startY), isRound: false };
         }
 
         if (shape.type === 'table') {
@@ -512,6 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         shapes.push(shape);
         setMode('select');
+        updateShareButtonState(); // Update on change
     }
 
     function promptForTableDetails(shapeIndex) {
@@ -533,6 +608,7 @@ document.addEventListener('DOMContentLoaded', () => {
         placedGuests.splice(guestIndex, 1);
         updateSeatedGuestsMap();
         renderGuestList();
+        updateShareButtonState(); // Update on change
     }
 
     function deleteShape(shapeIndex) {
@@ -551,6 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateSeatedGuestsMap();
         renderGuestList();
+        updateShareButtonState(); // Update on change
     }
 
     function getShapeAt(x, y) {
@@ -594,12 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
             trashCanContainer.classList.add('visible');
             const trashRect = trashCanContainer.getBoundingClientRect();
             const canvasRect = canvas.getBoundingClientRect();
-            const relativeTrashRect = {
-                x: trashRect.left - canvasRect.left,
-                y: trashRect.top - canvasRect.top,
-                width: trashRect.width,
-                height: trashRect.height
-            };
+            const relativeTrashRect = { x: trashRect.left - canvasRect.left, y: trashRect.top - canvasRect.top, width: trashRect.width, height: trashRect.height };
 
             let itemRect;
             if (isDraggingShape && shapes[selectedShapeIndex]) {
@@ -678,9 +750,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (isDraggingShape && shapes[selectedShapeIndex] && isOverTrash) {
                 const guestIds = seatedGuestsMap.get(selectedShapeIndex) || [];
-                if(guestIds.includes(guest.id)) {
-                    isDeleting = true;
-                }
+                if(guestIds.includes(guest.id)) isDeleting = true;
             }
             
             const progress = forExport ? 0 : guest.hoverProgress;
@@ -787,6 +857,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSeatedGuestsMap();
             renderGuestList();
             redrawCanvas();
+            updateShareButtonState(); // Update on change
         }
     });
 
@@ -794,13 +865,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     guestListContainer.addEventListener('drop', e => {
         if (selectedGuestIndex !== null) {
-            const guest = placedGuests[selectedGuestIndex];
-            guest.seated = false;
-            placedGuests.splice(selectedGuestIndex, 1);
-            selectedGuestIndex = null;
-            updateSeatedGuestsMap();
-            renderGuestList();
-            redrawCanvas();
+            unseatGuest(selectedGuestIndex); // This function now handles all updates
         }
     });
 
@@ -814,15 +879,12 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSeatedGuestsMap();
             renderGuestList();
             redrawCanvas();
+            updateShareButtonState(); // Update on change
         }
     });
 
     savePlanButton.addEventListener('click', () => {
-        const state = {
-            version: 2,
-            allGuests,
-            shapes,
-        };
+        const state = { version: 2, allGuests, shapes };
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
         const downloadAnchorNode = document.createElement('a');
         downloadAnchorNode.setAttribute("href", dataStr);
@@ -849,6 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateSeatedGuestsMap();
                 renderGuestList();
                 redrawCanvas();
+                updateShareButtonState(); // Update on change
                 alert('Plan loaded successfully!');
             } catch (error) {
                 alert('Failed to load or parse the plan file. ' + error.message);
@@ -880,14 +943,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- PDF Export ---
     function exportToPdf() {
-        const {
-            jsPDF
-        } = window.jspdf;
-        const doc = new jsPDF({
-            orientation: 'landscape',
-            unit: 'px',
-            format: [canvas.width, canvas.height]
-        });
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
 
         redrawCanvas(true);
         const canvasImage = canvas.toDataURL('image/png', 1.0);
@@ -927,22 +984,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     exportPdfButton.addEventListener('click', exportToPdf);
+    sharePlanButton.addEventListener('click', generateShareableLink); // Hook up the new share button
 
     // --- Keyboard Listeners ---
     window.addEventListener('keydown', (e) => {
-        if (e.key === 'Shift') {
-            shiftPressed = true;
-        }
+        if (e.key === 'Shift') shiftPressed = true;
     });
     window.addEventListener('keyup', (e) => {
-        if (e.key === 'Shift') {
-            shiftPressed = false;
-        }
+        if (e.key === 'Shift') shiftPressed = false;
     });
 
+    // --- Initial Load ---
     setMode('select');
     renderGuestList();
     redrawCanvas();
-
+    loadPlanFromUrl(); // Check for a shared plan in the URL on startup
+    updateShareButtonState(); // Set the initial state of the share button
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redrawCanvas(false));
 });

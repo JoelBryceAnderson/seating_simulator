@@ -1001,8 +1001,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadPlanFromUrl(); // Check for a shared plan in the URL on startup
     updateShareButtonState(); // Set the initial state of the share button
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redrawCanvas(false));
-});
 
+    const exportExcelButton = document.getElementById('export-excel');
 
     // --- Excel Export ---
     function exportToExcel() {
@@ -1053,5 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
         XLSX.utils.book_append_sheet(wb, guestSheet, "Guest List");
         XLSX.writeFile(wb, "seating_plan.xlsx");
     }
-    
-    document.getElementById('export-excel').addEventListener('click', exportToExcel);
+
+    exportExcelButton.addEventListener('click', exportToExcel);
+
+});

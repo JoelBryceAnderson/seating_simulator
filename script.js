@@ -1002,3 +1002,56 @@ document.addEventListener('DOMContentLoaded', () => {
     updateShareButtonState(); // Set the initial state of the share button
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => redrawCanvas(false));
 });
+
+
+    // --- Excel Export ---
+    function exportToExcel() {
+        const seatingData = [];
+        const guestData = [
+            ["First Name", "Last Name", "Party ID", "Table"]
+        ];
+
+        shapes.forEach((shape, index) => {
+            if (shape.type === 'table') {
+                const guestIds = seatedGuestsMap.get(index) || [];
+                const tableName = shape.label || `Table ${index + 1}`;
+
+                seatingData.push([tableName]);
+                seatingData.push(["First Name", "Last Name", "Party ID"]);
+
+                if (guestIds.length > 0) {
+                    guestIds.forEach(guestId => {
+                        const guest = allGuests.find(g => g.id === guestId);
+                        if (guest) {
+                            seatingData.push([guest.firstName, guest.lastName, guest.partyId]);
+                        }
+                    });
+                } else {
+                    seatingData.push(["(Empty)"]);
+                }
+                seatingData.push([]); // Add a blank row for spacing
+            }
+        });
+
+        allGuests.forEach(guest => {
+            let tableName = "Unseated";
+            if (guest.seated) {
+                for (const [tableIndex, guestIds] of seatedGuestsMap.entries()) {
+                    if (guestIds.includes(guest.id)) {
+                        tableName = shapes[tableIndex].label || `Table ${tableIndex + 1}`;
+                        break;
+                    }
+                }
+            }
+            guestData.push([guest.firstName, guest.lastName, guest.partyId, tableName]);
+        });
+
+        const seatingSheet = XLSX.utils.aoa_to_sheet(seatingData);
+        const guestSheet = XLSX.utils.aoa_to_sheet(guestData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, seatingSheet, "Seating Chart");
+        XLSX.utils.book_append_sheet(wb, guestSheet, "Guest List");
+        XLSX.writeFile(wb, "seating_plan.xlsx");
+    }
+    
+    document.getElementById('export-excel').addEventListener('click', exportToExcel);
